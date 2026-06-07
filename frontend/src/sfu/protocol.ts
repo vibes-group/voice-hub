@@ -531,7 +531,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     case 'screen-share-encode-resume': {
       const d = data as Record<string, unknown>;
       if (typeof data !== 'object' || data === null || !Array.isArray(d.layers)) {
-        console.warn(`[protocol] malformed '${event}' payload:`, data);
+        console.warn('[protocol] malformed payload:', event, data);
         return null;
       }
       return { event, data: data as ScreenShareEncodeLayersPayload };
