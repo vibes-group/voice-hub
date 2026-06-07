@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { ConnectionState } from './ipc';
 import { AudioWaveform, Wifi } from 'lucide-react';
@@ -9,7 +9,6 @@ export function Connect() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [host, setHost] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Pre-fill the saved host so "Change server" doesn't make the user retype.
   useEffect(() => {
@@ -56,7 +55,6 @@ export function Connect() {
           <input
             id="host"
             name="host"
-            ref={inputRef}
             value={host}
             onChange={(e) => setHost(e.target.value)}
             placeholder="vh.example.com"

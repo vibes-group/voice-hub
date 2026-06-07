@@ -168,11 +168,6 @@ async fn check(app: AppHandle, force: bool) {
     }
 }
 
-#[tauri::command]
-pub async fn check_for_update(app: AppHandle) {
-    check(app, /* force */ true).await;
-}
-
 // ---------------------------------------------------------------------------
 // Install state machine — AppHandle-free
 //

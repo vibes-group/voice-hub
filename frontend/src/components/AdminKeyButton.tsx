@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Key, Plus } from 'lucide-react';
-import { useIsAdmin } from '../hooks/useIsAdmin';
+import { useStore } from '../store/useStore';
 import { useConnPassApi } from '../hooks/useConnPassApi';
 import type { PlaintextResponse } from '../hooks/useConnPassApi';
 import { AdminConnPassEntryRow, TTL_PRESETS } from './AdminConnPassEntryRow';
@@ -10,7 +10,7 @@ type Mode = 'list' | 'plaintext';
 const MAX_ENTRIES = 16;
 
 export function AdminKeyButton() {
-  const isAdmin = useIsAdmin();
+  const isAdmin = useStore((s) => s.role === 'admin');
   const { entries, refresh, create, rotate, rename, revoke, setTTL, disconnectUsers } = useConnPassApi();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('list');
@@ -21,7 +21,7 @@ export function AdminKeyButton() {
   const [newLabel, setNewLabel] = useState('');
   const [newTTL, setNewTTL] = useState<number>(0);
 
-  // Seed the entry list once useIsAdmin flips true so the badge in the trigger
+  // Seed the entry list once isAdmin flips true so the badge in the trigger
   // can later show counts without opening the modal.
   useEffect(() => {
     if (!isAdmin) return;
@@ -43,107 +43,83 @@ export function AdminKeyButton() {
     setError(null);
   }, []);
 
-  const handleCreate = useCallback(async () => {
+  const withBusy = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
-      const data = await create(newLabel, newTTL);
-      if (data) {
-        setPlaintext(data);
-        setMode('plaintext');
-        setNewLabel('');
-        setNewTTL(0);
-        await refresh();
-      }
+      await fn();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [newLabel, newTTL, create, refresh]);
+  }, []);
+
+  const handleCreate = useCallback(
+    () =>
+      withBusy(async () => {
+        const data = await create(newLabel, newTTL);
+        if (data) {
+          setPlaintext(data);
+          setMode('plaintext');
+          setNewLabel('');
+          setNewTTL(0);
+          await refresh();
+        }
+      }),
+    [withBusy, create, newLabel, newTTL, refresh],
+  );
 
   const handleSetTTL = useCallback(
-    async (id: string, ttlSeconds: number) => {
-      setBusy(true);
-      setError(null);
-      try {
+    (id: string, ttlSeconds: number) =>
+      withBusy(async () => {
         await setTTL(id, ttlSeconds);
         await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [setTTL, refresh],
+      }),
+    [withBusy, setTTL, refresh],
   );
 
   const handleRotate = useCallback(
     async (id: string, label: string) => {
       const what = label ? `«${label}»` : 'этот пароль';
       if (!window.confirm(`Перегенерировать ${what}? Старый пароль перестанет работать.`)) return;
-      setBusy(true);
-      setError(null);
-      try {
+      await withBusy(async () => {
         const data = await rotate(id);
         setPlaintext(data);
         setMode('plaintext');
         await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
+      });
     },
-    [rotate, refresh],
+    [withBusy, rotate, refresh],
   );
 
   const handleRevoke = useCallback(
     async (id: string, label: string) => {
       const what = label ? `«${label}»` : 'этот пароль';
       if (!window.confirm(`Удалить ${what}?`)) return;
-      setBusy(true);
-      setError(null);
-      try {
+      await withBusy(async () => {
         await revoke(id);
         await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
+      });
     },
-    [revoke, refresh],
+    [withBusy, revoke, refresh],
   );
 
   const handleRename = useCallback(
-    async (id: string, label: string) => {
-      setBusy(true);
-      setError(null);
-      try {
+    (id: string, label: string) =>
+      withBusy(async () => {
         await rename(id, label);
         await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [rename, refresh],
+      }),
+    [withBusy, rename, refresh],
   );
 
   const handleDisconnectUsers = useCallback(async () => {
     if (!window.confirm('Отключить пользователей?')) return;
-    setBusy(true);
-    setError(null);
-    try {
+    await withBusy(async () => {
       await disconnectUsers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [disconnectUsers]);
+    });
+  }, [withBusy, disconnectUsers]);
 
   const copy = useCallback(async (label: string, text: string) => {
     try {

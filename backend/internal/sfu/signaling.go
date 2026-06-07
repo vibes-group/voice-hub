@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
 	"voice-hub/backend/internal/sfu/protocol"
@@ -174,21 +173,9 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		if have[t.ID()] {
 			continue
 		}
-		sender, err := p.pc.AddTrack(t)
-		if err != nil {
+		if _, err := p.pc.AddTrack(t); err != nil {
 			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
-		}
-		if t.Kind() == webrtc.RTPCodecTypeVideo {
-			if pub, ok := r.lookupPublisher(key); ok {
-				if pub.lastKeyframeNS == nil ||
-					time.Since(time.Unix(0, pub.lastKeyframeNS.Load())) > pliCooldown {
-					_ = pub.pc.WriteRTCP([]rtcp.Packet{
-						&rtcp.PictureLossIndication{MediaSSRC: pub.ssrc},
-					})
-				}
-				go r.forwardSubscriberRTCP(sender, key)
-			}
 		}
 	}
 
@@ -216,45 +203,4 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		return true
 	}
 	return false
-}
-
-// forwardSubscriberRTCP relays PLI/FIR from a subscriber's sender back to
-// the publisher's pc, rewriting MediaSSRC to the publisher's original
-// (pion allocates a fresh SSRC for each forwarded sender). NACK is handled
-// locally by the responder interceptor; everything else is dropped.
-func (r *Room) forwardSubscriberRTCP(sender *webrtc.RTPSender, key string) {
-	buf := make([]byte, 1500)
-	for {
-		n, _, err := sender.Read(buf)
-		if err != nil {
-			return
-		}
-		pkts, err := rtcp.Unmarshal(buf[:n])
-		if err != nil {
-			continue
-		}
-		var forward []rtcp.Packet
-		for _, pkt := range pkts {
-			switch pkt.(type) {
-			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
-				forward = append(forward, pkt)
-			}
-		}
-		if len(forward) == 0 {
-			continue
-		}
-		pub, ok := r.lookupPublisher(key)
-		if !ok {
-			continue
-		}
-		for _, pkt := range forward {
-			switch p := pkt.(type) {
-			case *rtcp.PictureLossIndication:
-				p.MediaSSRC = pub.ssrc
-			case *rtcp.FullIntraRequest:
-				p.MediaSSRC = pub.ssrc
-			}
-		}
-		_ = pub.pc.WriteRTCP(forward)
-	}
 }

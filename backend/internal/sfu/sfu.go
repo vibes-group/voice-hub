@@ -49,15 +49,11 @@ type Config struct {
 	OnPeerUpdated func(protocol.PeerInfo)
 }
 
-func OriginPatterns(appHostname string) []string {
-	if appHostname == "" || appHostname == "localhost" {
+func (cfg Config) originPatterns() []string {
+	if cfg.AppHostname == "" || cfg.AppHostname == "localhost" {
 		return []string{"localhost:*", "127.0.0.1:*"}
 	}
-	return []string{appHostname}
-}
-
-func (cfg Config) originPatterns() []string {
-	return OriginPatterns(cfg.AppHostname)
+	return []string{cfg.AppHostname}
 }
 
 type peer struct {
@@ -152,9 +148,6 @@ const (
 	bweHighThresholdBps = 3_000_000
 )
 
-// pliCooldown: skip immediate-on-subscribe PLI if a keyframe arrived within this window.
-const pliCooldown = time.Second
-
 func (p *peer) write(msg protocol.Envelope) error {
 	raw, err := json.Marshal(msg)
 	if err != nil {
@@ -222,14 +215,6 @@ func (p *peer) writeLoop() {
 	}
 }
 
-// publisherRef carries the publisher's original SSRC (pion allocates a fresh
-// one for subscriber senders; PLI/FIR forwarded back must use the original).
-type publisherRef struct {
-	pc             *webrtc.PeerConnection
-	ssrc           uint32
-	lastKeyframeNS *atomic.Int64
-}
-
 // Room holds the live state of all peers and forwarded tracks.
 type Room struct {
 	mu    sync.Mutex
@@ -237,13 +222,9 @@ type Room struct {
 	// tracks is keyed by trackKey(ownerID, kind) so one peer can
 	// publish both audio and screen-share video concurrently.
 	tracks map[string]*webrtc.TrackLocalStaticRTP
-	// publishersMu guards publishers independently of mu so forwardSubscriberRTCP
-	// (per-RTCP-packet hot path) reads without blocking room-wide operations.
-	publishersMu sync.RWMutex
-	publishers   map[string]publisherRef
-	cfg          Config
-	api          *webrtc.API
-	closed       atomic.Bool
+	cfg    Config
+	api    *webrtc.API
+	closed atomic.Bool
 
 	// pcCreateMu serialises NewPeerConnection so the cc OnNewPeerConnection
 	// callback (sync, during construction) can deposit into pendingBWE safely.
@@ -263,25 +244,6 @@ type Room struct {
 	// clientId eviction. Token is opaque-and-secret, so it doubles as the
 	// auth check that this peer owns the session. Guarded by r.mu.
 	screenSessionsByToken map[string]*ScreenShareSession
-}
-
-func (r *Room) setPublisher(key string, ref publisherRef) {
-	r.publishersMu.Lock()
-	r.publishers[key] = ref
-	r.publishersMu.Unlock()
-}
-
-func (r *Room) clearPublisher(key string) {
-	r.publishersMu.Lock()
-	delete(r.publishers, key)
-	r.publishersMu.Unlock()
-}
-
-func (r *Room) lookupPublisher(key string) (publisherRef, bool) {
-	r.publishersMu.RLock()
-	ref, ok := r.publishers[key]
-	r.publishersMu.RUnlock()
-	return ref, ok
 }
 
 // ServeWS upgrades the request to a WebSocket and runs one peer session.
@@ -978,21 +940,13 @@ func (r *Room) unpublishTrack(key string) {
 	r.signalPeerConnections()
 }
 
-// dropTracksForPeer clears all tracks and publisher entries for ownerID.
-// Caller must hold r.mu.
+// dropTracksForPeer clears all tracks for ownerID. Caller must hold r.mu.
 func (r *Room) dropTracksForPeer(ownerID string) {
 	for k := range r.tracks {
 		if ownerOf(k) == ownerID {
 			delete(r.tracks, k)
 		}
 	}
-	r.publishersMu.Lock()
-	for k := range r.publishers {
-		if ownerOf(k) == ownerID {
-			delete(r.publishers, k)
-		}
-	}
-	r.publishersMu.Unlock()
 }
 
 // bitrateToTIDCap returns bwCapNone above the high threshold so a healthy

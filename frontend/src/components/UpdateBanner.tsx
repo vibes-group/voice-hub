@@ -33,7 +33,6 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
 
   let message: string;
   let actionLabel: string | null;
-  let actionDisabled = false;
   let bar: number | null = null;
 
   if (!isDesktop) {
@@ -44,13 +43,11 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
       case 'downloading':
         message = formatProgress(desktopApplyState.progress);
         actionLabel = null;
-        actionDisabled = true;
         bar = progressFraction(desktopApplyState.progress);
         break;
       case 'installing':
         message = 'Устанавливаем обновление…';
         actionLabel = null;
-        actionDisabled = true;
         bar = 1;
         break;
       case 'error':
@@ -66,7 +63,6 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
   }
 
   const onAction = () => {
-    if (actionDisabled) return;
     if (joinState === 'joined') {
       setRejoinFlag();
     }
@@ -85,7 +81,6 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
           <button
             type="button"
             onClick={onAction}
-            disabled={actionDisabled}
             className="btn btn-primary btn-mini"
           >
             {actionLabel}

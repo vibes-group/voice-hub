@@ -153,10 +153,6 @@ export function useAudioEngine() {
     [clearLocalGraph, clearRawMic, openMicStream],
   );
 
-  const teardownGraph = useCallback(() => {
-    clearLocalGraph();
-  }, [clearLocalGraph]);
-
   const prepareLocalAudio = useCallback(
     async (engine: EngineKind, onProgress?: (stage: 'mic-ready') => void) => {
       void preloadEngine(engine);
@@ -176,7 +172,6 @@ export function useAudioEngine() {
     async (
       engine: EngineKind,
       selfMuted: boolean,
-      _peerId: string | null,
       getSFUPeerConnection: () => RTCPeerConnection | null,
     ) => {
       const r = refs.current;
@@ -234,7 +229,7 @@ export function useAudioEngine() {
       selfMuted: boolean,
       getSFUPeerConnection: () => RTCPeerConnection | null,
     ) => {
-      teardownGraph();
+      clearLocalGraph();
       clearRawMic();
       await acquireMic(engine);
       const graph = await buildGraph(engine);
@@ -245,7 +240,7 @@ export function useAudioEngine() {
       if (sender) await sender.replaceTrack(newTrack);
       return graph;
     },
-    [acquireMic, buildGraph, clearRawMic, teardownGraph],
+    [acquireMic, buildGraph, clearRawMic, clearLocalGraph],
   );
 
   const updateSendGain = useCallback(() => {
@@ -259,7 +254,6 @@ export function useAudioEngine() {
     (
       graph: MicGraph,
       getSelfMuted: () => boolean,
-      _getPeerId: () => string | null,
       onSpeakingChange: (speaking: boolean) => void,
     ) => {
       refs.current.speakingLoop.register(LOCAL_SPEAKING_ID, {
@@ -343,16 +337,15 @@ export function useAudioEngine() {
   }, []);
 
   const fullCleanup = useCallback(() => {
-    teardownGraph();
+    clearLocalGraph();
     cleanupAllRemote();
     clearRawMic();
-  }, [teardownGraph, cleanupAllRemote, clearRawMic]);
+  }, [clearLocalGraph, cleanupAllRemote, clearRawMic]);
 
   return {
     prepareLocalAudio,
     rebuildLocalAudio,
     switchMicDevice,
-    teardownGraph,
     updateSendGain,
     startSpeaking,
     attachRemoteStream,

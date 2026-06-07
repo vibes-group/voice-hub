@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
-import { formatFpsLabel, formatQualityLabel } from '../screenshare/labels';
 import { useVideoFps } from '../screenshare/useVideoFps';
 import { ScreenShareSettings } from './ScreenShareSettings';
 import type { ShareMode } from '../screenshare/params';
@@ -128,8 +127,8 @@ function SelfPreview({
     };
   }, [stream]);
 
-  const qualityLabel = videoSize ? formatQualityLabel(videoSize.w, videoSize.h) : null;
-  const fpsLabel = fps !== null ? formatFpsLabel(fps) : null;
+  const qualityLabel = videoSize ? `${videoSize.w}×${videoSize.h}` : null;
+  const fpsLabel = fps !== null ? `${Math.round(fps)}fps` : null;
 
   return (
     <div className="relative">

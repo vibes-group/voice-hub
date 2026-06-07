@@ -12,7 +12,6 @@ import (
 	"log"
 	"net"
 	"strconv"
-	"strings"
 	"time"
 
 	pionlogging "github.com/pion/logging"
@@ -118,9 +117,4 @@ func GenerateCredentials(secret, id string, ttl time.Duration) (username, creden
 	mac.Write([]byte(username))
 	credential = base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return
-}
-
-// SanitizeID strips characters that would break the username scheme.
-func SanitizeID(s string) string {
-	return strings.ReplaceAll(s, ":", "_")
 }

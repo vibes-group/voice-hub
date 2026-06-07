@@ -23,14 +23,14 @@ func TestChainTrackerRequiresKeyframeBootstrap(t *testing.T) {
 	if ct.Allow(&dd.Descriptor{FrameNumber: 10, IsKeyframe: false, ChainDiffs: []uint8{1}}) {
 		t.Fatal("Allow before bootstrap should be false")
 	}
-	if !ct.Broken() {
+	if !ct.broken {
 		t.Fatal("Broken should be true after first pre-bootstrap drop")
 	}
 	// Keyframe re-arms.
 	if !ct.Allow(&dd.Descriptor{FrameNumber: 11, IsKeyframe: true}) {
 		t.Fatal("Allow on keyframe should be true")
 	}
-	if ct.Broken() {
+	if ct.broken {
 		t.Fatal("Broken should clear on keyframe")
 	}
 }
@@ -56,7 +56,7 @@ func TestChainTrackerBreaksOnGap(t *testing.T) {
 	if ct.Allow(&dd.Descriptor{FrameNumber: 101, ChainDiffs: []uint8{2}}) {
 		t.Fatal("Allow should return false on missing chain predecessor")
 	}
-	if !ct.Broken() {
+	if !ct.broken {
 		t.Fatal("Broken should be true after chain miss")
 	}
 	// Subsequent non-keyframes stay broken.

@@ -77,12 +77,10 @@ export interface AppState {
   // True once /api/config has resolved — gates Join so users can't click
   // before iceServers are known.
   configReady: boolean;
-  setConfigReady: (v: boolean) => void;
 
   // Caller's session role from /api/config. null until config resolves.
   // Drives admin-only UI (AdminKeyButton) without a separate probe endpoint.
   role: Role | null;
-  setRole: (r: Role | null) => void;
 
   // Mute/deafen are persistent (Discord-style — survive reload).
   // There is no separate outputMuted field on purpose: the previous
@@ -157,9 +155,7 @@ export const useStore = create<AppState>((set, get) => ({
   joinState: 'idle',
   setJoinState: (s) => set({ joinState: s }),
   configReady: false,
-  setConfigReady: (v) => set({ configReady: v }),
   role: null,
-  setRole: (r) => set({ role: r }),
 
   selfMuted: loadBoolean(KEYS.selfMuted, false),
   setSelfMuted: (v) => {

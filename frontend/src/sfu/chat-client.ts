@@ -29,7 +29,6 @@ export type ChatOnlyClient = {
   disconnect(): void;
   sendChat(payload: ChatSendPayload): void;
   sendPing(targetId: string): void;
-  getId(): string | null;
 };
 
 export function closeWebSocket(ws: WebSocket): void {
@@ -64,7 +63,6 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
   };
 
   let ws: WebSocket | null = null;
-  let myId: string | null = null;
   let stopped = false;
 
   function send(event: string, data: unknown): void {
@@ -116,7 +114,6 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
         if (!msg) return;
         switch (msg.event) {
           case 'welcome':
-            myId = msg.data.id;
             on.onWelcome(msg.data);
             break;
           case 'peer-joined':
@@ -149,7 +146,6 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
       closeWebSocket(ws);
       ws = null;
     }
-    myId = null;
   }
 
   function sendChat(payload: ChatSendPayload): void {
@@ -160,9 +156,5 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     send('ping', { to: targetId });
   }
 
-  function getId(): string | null {
-    return myId;
-  }
-
-  return { connect, disconnect, sendChat, sendPing, getId };
+  return { connect, disconnect, sendChat, sendPing };
 }

@@ -64,10 +64,6 @@ func (t *ChainTracker) reset() {
 	t.bootstrapped = false
 }
 
-// Broken returns true while the chain is held broken — the SFU forward path
-// uses this to decide whether to request a PLI from the publisher.
-func (t *ChainTracker) Broken() bool { return t.broken }
-
 // Allow decides whether to forward a packet to the subscriber. Returns true
 // when the chain is intact (or there is no chain to check); false when the
 // packet would punch a hole the subscriber's decoder can't recover from.

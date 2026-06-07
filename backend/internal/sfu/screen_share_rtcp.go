@@ -75,10 +75,3 @@ func (r *Room) forwardScreenVideoRTCPToPublisher(session *ScreenShareSession, su
 		}
 	})
 }
-
-// forwardScreenAudioRTCPToPublisher relays PLI/FIR from a subscriber's audio
-// sender to the publisher's PC. Audio-side RRs are dropped so they do not
-// clobber the video-side lossPerMille used by the auto-downgrade loop.
-func (r *Room) forwardScreenAudioRTCPToPublisher(session *ScreenShareSession, sender *webrtc.RTPSender) {
-	r.forwardRTCPToPublisher(session, sender, nil)
-}

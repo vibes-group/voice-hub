@@ -360,27 +360,7 @@ func (s *ConnPassStore) persist(state connPassFileFormat) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), connPassFile+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpName, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, s.path)
+	return atomicWrite(s.path, data, 0o600)
 }
 
 func hashArgon2id(plain string) (string, error) {

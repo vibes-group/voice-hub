@@ -103,7 +103,6 @@ pub fn run() {
             connection::set_host,
             connection::disconnect,
             connection::change_server,
-            updater::check_for_update,
             updater::apply_update,
             commands::flash_attention,
         ])

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { ArrowLeftRight, LogIn } from 'lucide-react';
 import { isTauri } from './utils/tauri';
 import './styles/main.css';
@@ -6,7 +6,6 @@ import './styles/main.css';
 export function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const formRef = useRef<HTMLFormElement>(null);
 
   // Desktop only: an unauthenticated user with a wrong/expired password can't
   // reach the in-app TopBar button, so expose a way out from the login screen.
@@ -79,7 +78,6 @@ export function Login() {
         <div className="text-muted-2 text-[12px] mb-6">Введите пароль для входа.</div>
         <form
           id="login-form"
-          ref={formRef}
           method="post"
           action="/api/login"
           onSubmit={handleSubmit}

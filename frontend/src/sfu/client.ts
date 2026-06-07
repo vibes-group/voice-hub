@@ -80,7 +80,6 @@ export type SFUClient = {
   sendChat(payload: ChatSendPayload): void;
   sendPing(targetId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
-  getId(): string | null;
   startScreenShare(): Promise<void>;
   stopScreenShare(): void;
   updateScreenShareParams(): Promise<void>;
@@ -121,7 +120,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   let ws: WebSocket | null = null;
   let pc: RTCPeerConnection | null = null;
-  let myId: string | null = null;
   let stopped = false;
   let iceServers: RTCIceServer[] = [];
 
@@ -273,7 +271,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       resumeContinuation = null;
       cont.reject(new Error('sfu-client: reconnect interrupted resume'));
     }
-    myId = null;
 
     iceServers = opts.iceServers ?? iceServers;
     return setupAudioAndWS(opts).catch((err) => {
@@ -285,7 +282,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   async function handleServerMessage(msg: ServerMessage): Promise<void> {
     switch (msg.event) {
       case 'welcome':
-        myId = msg.data.id;
         screenShareCodecs.clear();
         for (const peer of msg.data.peers) {
           if (peer.screenSharing && isScreenVideoCodec(peer.screenSharingVideoCodec)) {
@@ -963,10 +959,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     return pc;
   }
 
-  function getId(): string | null {
-    return myId;
-  }
-
   function disconnect(): void {
     stopped = true;
     if (screenPubPC) stopScreenShare();
@@ -985,7 +977,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       }
       pc = null;
     }
-    myId = null;
   }
 
   return {
@@ -997,7 +988,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     sendChat,
     sendPing,
     getPeerConnection,
-    getId,
     startScreenShare,
     stopScreenShare,
     updateScreenShareParams,

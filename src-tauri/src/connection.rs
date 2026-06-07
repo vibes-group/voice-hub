@@ -85,18 +85,17 @@ pub fn normalize_host(input: &str) -> Result<Url, String> {
     }
 }
 
-/// Tauri's local content origin. Differs by platform; constructed at runtime
-/// so navigate() can return to connect.html from a remote page.
-fn local_url(path: &str) -> Url {
+/// Tauri's local content origin pointing at connect.html. Differs by platform;
+/// constructed at runtime so navigate() can return there from a remote page.
+fn connect_url() -> Url {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let base = "tauri://localhost/";
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let base = "http://tauri.localhost/";
-    // Both base strings are compile-time constants that are valid URL prefixes,
-    // and path is always CONNECT_PATH ("connect.html") — a simple filename with
-    // no characters that would break URL parsing. This cannot fail in practice.
-    Url::parse(&format!("{base}{path}"))
-        .unwrap_or_else(|e| unreachable!("local_url: constant base + path failed to parse: {e}"))
+    // Both bases are compile-time-constant valid URL prefixes and CONNECT_PATH
+    // is a plain filename, so parsing cannot fail in practice.
+    Url::parse(&format!("{base}{CONNECT_PATH}"))
+        .unwrap_or_else(|e| unreachable!("connect_url: constant base + path failed to parse: {e}"))
 }
 
 #[derive(Serialize)]
@@ -125,12 +124,12 @@ pub fn set_host(app: AppHandle, host: String) -> Result<(), String> {
 #[tauri::command]
 pub fn disconnect(app: AppHandle) -> Result<(), String> {
     delete_host();
-    navigate_to(&app, local_url(CONNECT_PATH))
+    navigate_to(&app, connect_url())
 }
 
 #[tauri::command]
 pub fn change_server(app: AppHandle) -> Result<(), String> {
-    navigate_to(&app, local_url(CONNECT_PATH))
+    navigate_to(&app, connect_url())
 }
 
 fn navigate_to(app: &AppHandle, url: Url) -> Result<(), String> {

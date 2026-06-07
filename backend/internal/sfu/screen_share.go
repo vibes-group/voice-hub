@@ -26,9 +26,9 @@ func seqSeed() uint32 { return mathrand.Uint32() & 0xffff }
 // Grace window during which a publisher's session survives a WS disconnect for resume.
 const screenShareGracePeriod = 5 * time.Second
 
-// Used for "full pause" / "full resume" dynacast — selective per-layer pause is
-// out of scope until BWE-driven auto-downgrade lands.
-// Do not mutate; treat as immutable shared slice.
+// Passed to the pause/resume helpers to stop or restart the entire screen
+// stream (no subscribers, or publisher gone). Do not mutate; treat as
+// immutable shared slice.
 var allScreenEncodeLayers = []int{0, 1, 2}
 
 // autoDowngradePollInterval is the cadence at which the decision loop wakes

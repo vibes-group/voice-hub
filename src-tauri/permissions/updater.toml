@@ -4,6 +4,5 @@
 identifier = "allow-updater-app"
 description = "Allow Voice Hub in-app updater commands (check/apply)."
 commands.allow = [
-    "check_for_update",
     "apply_update",
 ]

@@ -2,12 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import './styles/main.css';
 import { useStore, selectSelfPeerId } from './store/useStore';
 import { useAudioEngine } from './hooks/useAudioEngine';
-import { preloadEngine } from './audio/engine';
+import { formatEngine, preloadEngine } from './audio/engine';
 import { useSFU } from './hooks/useSFU';
 import { useSessionManager } from './hooks/useSessionManager';
 import { useGlobalShortcut } from './hooks/useShortcut';
-import { loadOrCreateDisplayName, saveDisplayName } from './utils/storage';
-import { makeGuestName, formatEngine } from './utils/clamp';
+import { loadOrCreateDisplayName, makeGuestName, saveDisplayName } from './utils/storage';
 import { playMuteSound, playUnmuteSound } from './audio/feedback-sounds';
 import type { EngineKind } from './types';
 

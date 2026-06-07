@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
 import { ENGINE_OPTIONS, type ActiveEngineKind } from '../audio/engine';
+import { Toggle } from './Toggle';
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -18,30 +19,6 @@ function SliderHead({ label, value }: { label: string; value: string }) {
       <span className="text-muted">{label}</span>
       <span className="text-accent tabular-nums">{value}</span>
     </div>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  ariaLabel,
-}: {
-  checked: boolean;
-  onChange: () => void;
-  ariaLabel: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel}
-      onClick={onChange}
-      className="vh-toggle"
-      data-checked={checked}
-    >
-      <span className="vh-toggle-dot" />
-    </button>
   );
 }
 

@@ -2,15 +2,13 @@
 // Mute (going off):  880 → 440 Hz descending.
 // Unmute (going on): 440 → 880 Hz ascending.
 
-import { resolveAudioContextCtor } from './context';
-
 const PEAK = 0.15;
 const DURATION = 0.09;
 
 function playGlide(from: number, to: number): void {
   let ctx: AudioContext;
   try {
-    ctx = new (resolveAudioContextCtor())({ sampleRate: 48000 });
+    ctx = new AudioContext({ sampleRate: 48000 });
   } catch {
     return;
   }
@@ -41,7 +39,7 @@ export function playUnmuteSound(): void {
 export function playPing(): void {
   let ctx: AudioContext;
   try {
-    ctx = new (resolveAudioContextCtor())({ sampleRate: 48000 });
+    ctx = new AudioContext({ sampleRate: 48000 });
   } catch {
     return;
   }

@@ -40,6 +40,10 @@ export function getEngineLabel(engine: string): string | null {
   return getDenoiser(engine)?.label ?? null;
 }
 
+export function formatEngine(engine: string): string {
+  return getEngineLabel(engine) ?? engine;
+}
+
 export function preloadEngine(engine: EngineKind): Promise<void> {
   if (engine === 'off' || isCaptureEngine(engine)) return Promise.resolve();
   const d = getDenoiser(engine);

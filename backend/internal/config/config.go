@@ -72,21 +72,6 @@ func envBool(key string, fallback bool) bool {
 	return parsed
 }
 
-func envInt(key string, fallback int) int {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		log.Printf("config: bad %s=%q (%v), using default %d", key, value, err, fallback)
-		return fallback
-	}
-
-	return parsed
-}
-
 func envUint16(key string, fallback uint16) uint16 {
 	value := os.Getenv(key)
 	if value == "" {

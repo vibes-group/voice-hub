@@ -164,6 +164,10 @@ export function clearDisplayName(): void {
   localStorage.removeItem(KEYS.displayName);
 }
 
+export function makeGuestName(): string {
+  return `~${Math.random().toString(36).slice(2, 7)}`;
+}
+
 // Stable client identifier. Generated once on first launch via
 // crypto.randomUUID() (available in all Tauri webviews and modern browsers
 // over a secure context) and persisted forever. Clearing localStorage =

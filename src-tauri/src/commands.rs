@@ -58,6 +58,6 @@ pub fn cancel_capture(state: State<'_, SharedState>) {
 }
 
 #[tauri::command]
-pub async fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), String> {
+pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), String> {
     tray_flash::flash_attention(app, tray, window)
 }

@@ -106,7 +106,6 @@ func NewRoom(cfg Config) (*Room, error) {
 	r := &Room{
 		peers:                 make(map[string]*peer),
 		tracks:                make(map[string]*webrtc.TrackLocalStaticRTP),
-		publishers:            make(map[string]publisherRef),
 		screenSessionsByToken: make(map[string]*ScreenShareSession),
 		cfg:                   cfg,
 	}

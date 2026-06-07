@@ -49,8 +49,8 @@ func (r *Room) startScreenShareGrace(session *ScreenShareSession) {
 // lock-phase of a screen-share-resume: it looks up the session, checks for
 // concurrent claims, cancels the grace timer, tears down stale subscribers,
 // and migrates the session onto the new peer p. Returns the claimed session,
-// the old publisher ID, the stale subscribers to tear down, and the grace
-// cancel func that was already invoked.
+// the old publisher ID, and the stale subscribers to tear down. Any armed
+// grace timer is cancelled internally before returning.
 //
 // On success r.mu has been released. On error an appropriate screen-share-error
 // has been sent and both locks are released.
@@ -58,7 +58,6 @@ func (r *Room) claimScreenShareSession(p *peer, token string) (
 	session *ScreenShareSession,
 	oldPubID string,
 	staleSubs []*screenSubscriber,
-	graceCancel context.CancelFunc,
 	err error,
 ) {
 	r.mu.Lock()
@@ -67,20 +66,20 @@ func (r *Room) claimScreenShareSession(p *peer, token string) (
 		r.mu.Unlock()
 		log.Printf("sfu: screen-share-resume (%s): unknown token", p.id)
 		r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
-		return nil, "", nil, nil, errResumeRejected
+		return nil, "", nil, errResumeRejected
 	}
 	// Refuse if some other live peer claims this session.
 	if existing, ok := r.peers[session.PublisherID]; ok && existing != p {
 		r.mu.Unlock()
 		log.Printf("sfu: screen-share-resume (%s): token in use by %s", p.id, session.PublisherID)
 		r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
-		return nil, "", nil, nil, errResumeRejected
+		return nil, "", nil, errResumeRejected
 	}
 	if p.screenSession != nil && p.screenSession != session {
 		r.mu.Unlock()
 		log.Printf("sfu: screen-share-resume (%s): peer already owns another session", p.id)
 		r.sendScreenShareError(p, "", protocol.ReasonAlreadyPublishing)
-		return nil, "", nil, nil, errResumeRejected
+		return nil, "", nil, errResumeRejected
 	}
 
 	session.mu.Lock()
@@ -88,12 +87,12 @@ func (r *Room) claimScreenShareSession(p *peer, token string) (
 		session.mu.Unlock()
 		r.mu.Unlock()
 		r.sendScreenShareError(p, "", protocol.ReasonInvalidToken)
-		return nil, "", nil, nil, errResumeRejected
+		return nil, "", nil, errResumeRejected
 	}
 	oldPubID = session.PublisherID
 	// Claim BEFORE releasing r.mu so concurrent resumes see the new owner.
 	session.PublisherID = p.id
-	graceCancel = session.graceCancel
+	graceCancel := session.graceCancel
 	session.graceCancel = nil
 	staleSubs = make([]*screenSubscriber, 0, len(session.subscribers))
 	for _, s := range session.subscribers {
@@ -111,7 +110,7 @@ func (r *Room) claimScreenShareSession(p *peer, token string) (
 	if graceCancel != nil {
 		graceCancel()
 	}
-	return session, oldPubID, staleSubs, graceCancel, nil
+	return session, oldPubID, staleSubs, nil
 }
 
 // errResumeRejected is returned by claimScreenShareSession when the resume is
@@ -123,7 +122,7 @@ var errResumeRejected = errors.New("resume rejected")
 // Token is the auth check: it was issued at the original start and only the
 // legitimate publisher has it.
 func (r *Room) handleScreenShareResume(p *peer, data protocol.ScreenShareResumeData) {
-	session, oldPubID, staleSubs, _, err := r.claimScreenShareSession(p, data.SessionToken)
+	session, oldPubID, staleSubs, err := r.claimScreenShareSession(p, data.SessionToken)
 	if err != nil {
 		return
 	}

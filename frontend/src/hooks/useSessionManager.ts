@@ -12,10 +12,11 @@ import { useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useAudioEngine } from './useAudioEngine';
-import { preloadEngine, isEngineReady } from '../audio/engine';
+import { preloadEngine, isEngineReady, formatEngine } from '../audio/engine';
 import { useSFU } from './useSFU';
 import {
   loadOrCreateDisplayName,
+  makeGuestName,
   saveDisplayName,
   consumeRejoinFlag,
   loadOrCreateClientId,
@@ -26,7 +27,6 @@ import { SCREEN_SHARE_NO_CODEC } from '../sfu/client';
 import { playPing } from '../audio/feedback-sounds';
 import { flashAttention } from '../utils/tray';
 import { flashFavicon } from '../utils/favicon';
-import { makeGuestName, formatEngine } from '../utils/clamp';
 import { loadAppConfig, buildWsUrl } from '../config';
 import { isTauri } from '../utils/tauri';
 import { createReconnectScheduler } from '../utils/reconnect';
@@ -137,7 +137,6 @@ export function useSessionManager({
       audio.startSpeaking(
         graph,
         () => useStore.getState().selfMuted,
-        () => peerIdRef.current,
         (speaking) => {
           const pid = peerIdRef.current;
           if (!pid) return;
@@ -156,7 +155,6 @@ export function useSessionManager({
       const graph = await audio.rebuildLocalAudio(
         engine,
         useStore.getState().selfMuted,
-        peerIdRef.current,
         () => sfu.getPeerConnection(),
       );
       micGraphRef.current = graph;
