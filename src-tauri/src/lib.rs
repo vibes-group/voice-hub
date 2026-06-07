@@ -101,7 +101,6 @@ pub fn run() {
             commands::cancel_capture,
             connection::get_state,
             connection::set_host,
-            connection::disconnect,
             connection::change_server,
             updater::apply_update,
             commands::flash_attention,

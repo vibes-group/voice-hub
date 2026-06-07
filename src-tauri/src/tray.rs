@@ -21,7 +21,6 @@ const ITEM_UPDATE: &str = "update_apply";
 const ITEM_CHECK: &str = "update_check";
 const ITEM_SHOW: &str = "show_window";
 const ITEM_CHANGE_SERVER: &str = "change_server";
-const ITEM_DISCONNECT: &str = "disconnect";
 const ITEM_AUTOSTART: &str = "autostart";
 const ITEM_QUIT: &str = "quit";
 
@@ -36,18 +35,11 @@ fn autostart_enabled(app: &AppHandle) -> bool {
 }
 
 /// Build the tray menu. When `update_version` is `Some`, an "Install vX.Y.Z"
-/// item appears at the top separated from the rest. `connected` controls
-/// whether the "Disconnect" item is enabled; callers must pass `load_host().is_some()`.
-pub fn build_menu(
-    app: &AppHandle,
-    update_version: Option<&str>,
-    connected: bool,
-) -> tauri::Result<Menu<Wry>> {
+/// item appears at the top separated from the rest.
+pub fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Result<Menu<Wry>> {
     let show = MenuItem::with_id(app, ITEM_SHOW, "Открыть Voice Hub", true, None::<&str>)?;
     let check = MenuItem::with_id(app, ITEM_CHECK, "Проверить обновления", true, None::<&str>)?;
     let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Сменить сервер", true, None::<&str>)?;
-    let disconnect =
-        MenuItem::with_id(app, ITEM_DISCONNECT, "Отключиться", connected, None::<&str>)?;
     let autostart = CheckMenuItem::with_id(
         app,
         ITEM_AUTOSTART,
@@ -75,7 +67,6 @@ pub fn build_menu(
         .item(&check)
         .item(&sep1)
         .item(&change)
-        .item(&disconnect)
         .item(&sep2)
         .item(&autostart)
         .item(&sep3)
@@ -85,7 +76,7 @@ pub fn build_menu(
 
 /// Construct the tray icon and attach event handlers. Called once at startup.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_menu(app, None, connection::load_host().is_some())?;
+    let menu = build_menu(app, None)?;
     // default_window_icon() is None only when no icon is configured in
     // tauri.conf.json. Voice Hub always ships with icons (icons/32x32.png
     // etc.), so None is unreachable in a correctly-built package.
@@ -115,7 +106,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 
 /// Replace the tray menu and tooltip to reflect an available update.
 pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()> {
-    let menu = build_menu(app, Some(version), connection::load_host().is_some())?;
+    let menu = build_menu(app, Some(version))?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
         tray.set_tooltip(Some(format!("Voice Hub — доступна v{version}")))?;
@@ -126,7 +117,7 @@ pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()>
 /// Rebuild the tray menu in place, preserving any pending update.
 fn refresh_menu(app: &AppHandle) -> tauri::Result<()> {
     let pending = updater::pending_version(app);
-    let menu = build_menu(app, pending.as_deref(), connection::load_host().is_some())?;
+    let menu = build_menu(app, pending.as_deref())?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(menu))?;
     }
@@ -168,12 +159,6 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             show_main(app);
             if let Err(err) = connection::change_server(app.clone()) {
                 log::error!("change_server: {err}");
-            }
-        }
-        ITEM_DISCONNECT => {
-            show_main(app);
-            if let Err(err) = connection::disconnect(app.clone()) {
-                log::error!("disconnect: {err}");
             }
         }
         ITEM_AUTOSTART => {

@@ -2,10 +2,9 @@
 
 [[permission]]
 identifier = "allow-connection"
-description = "Allow Voice Hub connection commands (get_state/set_host/disconnect/change_server)."
+description = "Allow Voice Hub connection commands (get_state/set_host/change_server)."
 commands.allow = [
     "get_state",
     "set_host",
-    "disconnect",
     "change_server",
 ]

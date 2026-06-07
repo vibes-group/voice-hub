@@ -45,19 +45,6 @@ fn save_host(host: &str) -> Result<(), String> {
         .map_err(|e| format!("keyring write: {e}"))
 }
 
-fn delete_host() {
-    match keyring_entry() {
-        Ok(entry) => {
-            if let Err(err) = entry.delete_credential() {
-                if !matches!(err, keyring::Error::NoEntry) {
-                    log::warn!("keyring delete failed: {err}");
-                }
-            }
-        }
-        Err(err) => log::warn!("keyring init for delete failed: {err}"),
-    }
-}
-
 /// Normalize "vh.example.com" / "https://vh.example.com:8443" into an absolute
 /// URL with an explicit scheme. HTTP is permitted only for localhost.
 pub fn normalize_host(input: &str) -> Result<Url, String> {
@@ -119,12 +106,6 @@ pub fn set_host(app: AppHandle, host: String) -> Result<(), String> {
     let url = normalize_host(&host)?;
     save_host(url.as_str())?;
     navigate_to(&app, url)
-}
-
-#[tauri::command]
-pub fn disconnect(app: AppHandle) -> Result<(), String> {
-    delete_host();
-    navigate_to(&app, connect_url())
 }
 
 #[tauri::command]
