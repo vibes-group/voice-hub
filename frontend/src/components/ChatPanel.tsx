@@ -2,7 +2,7 @@ import { memo, useRef, useMemo, useEffect, useState, useCallback, type ReactNode
 import { selectSelfPeerId, useStore, type ChatMessage } from '../store/useStore';
 import { CHAT_MAX_BYTES } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
-import { Send } from 'lucide-react';
+import { Send, Info } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
 
 // http(s):// or bare www. — greedy until whitespace/quotes/angle brackets,
@@ -72,6 +72,9 @@ function renderText(text: string): ReactNode {
 }
 
 const MAX_DISPLAY = 200;
+
+const CHAT_HINT =
+  'Сообщения видны всем в комнате.\nСервер их не хранит — только пересылает.\nИстория хранится локально на устройстве: 7 дней или 500 сообщений.';
 
 function byteLength(s: string): number {
   return TEXT_ENCODER.encode(s).length;
@@ -213,7 +216,21 @@ export function ChatPanel({ roomId, onSend }: Props) {
   return (
     <section className="card p-0! flex flex-col flex-1 min-h-0">
       <div className="px-6 pt-5 pb-4 border-b border-line shrink-0">
-        <h2 className="card-title">Чат</h2>
+        <h2 className="card-title flex items-center gap-1.5">
+          Чат
+          <span
+            tabIndex={0}
+            className="group relative inline-flex outline-none cursor-help text-muted-2/60 hover:text-muted-2 focus-visible:text-muted-2 transition-colors"
+          >
+            <Info size={15} strokeWidth={2} aria-label="Как работает чат" />
+            <span
+              role="tooltip"
+              className="pointer-events-none invisible absolute left-0 top-full z-20 mt-2 w-max whitespace-pre border border-line-strong bg-bg-3 px-3 py-2 text-[12px] leading-snug text-muted normal-case tracking-normal font-normal opacity-0 shadow-lg transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+            >
+              {CHAT_HINT}
+            </span>
+          </span>
+        </h2>
       </div>
 
       <div
