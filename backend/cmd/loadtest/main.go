@@ -1,7 +1,9 @@
 // Command loadtest drives synthetic load against a running voice-hub
 // server. It authenticates via POST /api/login, opens N pion-backed
-// peers via /ws, performs the full SDP/ICE exchange, optionally
+// peers via /ws/{room}, performs the full SDP/ICE exchange, optionally
 // publishes a fake Opus track, and reports rolling per-second stats.
+// Exits non-zero when peers fail to connect or no RTP flows, so it
+// doubles as a CI smoke gate.
 //
 // Example:
 //
@@ -50,6 +52,7 @@ import (
 func main() {
 	var (
 		target        = flag.String("target", "http://localhost:8080", "voice-hub base URL (http:// or https://)")
+		room          = flag.String("room", "room1", "room slug to join")
 		password      = flag.String("password", "", "admin password for /api/login (mutually exclusive with -password-stdin)")
 		passwordStdin = flag.Bool("password-stdin", false, "read password from stdin (use this to avoid leaving the secret in argv / shell history)")
 		peers         = flag.Int("peers", 10, "number of synthetic peers")
@@ -88,7 +91,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("login: %v", err)
 	}
-	wsURL := strings.Replace(*target, "http", "ws", 1) + "/ws"
+	wsURL := strings.Replace(*target, "http", "ws", 1) + "/ws/" + *room
 	log.Printf("logged in, ws=%s", wsURL)
 
 	api := newAPI()
@@ -167,6 +170,16 @@ func main() {
 		}
 	}
 	stats.print(int(time.Since(connectStart).Seconds()))
+
+	connected := stats.connected.Load()
+	if connected < int64(*peers) {
+		log.Printf("FAIL: connected %d/%d peers", connected, *peers)
+		os.Exit(1)
+	}
+	if pubCount > 0 && connected > int64(pubCount) && stats.rtpRecv.Load() == 0 {
+		log.Print("FAIL: publishers were sending but listeners received no RTP")
+		os.Exit(1)
+	}
 }
 
 // runStats holds rolling counters reported by the stats printer.
@@ -294,7 +307,7 @@ func dialClient(parent context.Context, wsURL, displayName, clientID, cookie str
 		if ice == nil {
 			return
 		}
-		b, err := json.Marshal(ice.ToJSON())
+		b, err := json.Marshal(protocol.CandidateEnvelope{PC: protocol.PCAudio, ICECandidateInit: ice.ToJSON()})
 		if err != nil {
 			return
 		}
@@ -368,7 +381,7 @@ func (c *loadClient) readLoop() {
 			if err := c.pc.SetLocalDescription(answer); err != nil {
 				continue
 			}
-			ans, _ := json.Marshal(answer)
+			ans, _ := json.Marshal(protocol.AnswerEnvelope{PC: protocol.PCAudio, SessionDescription: answer})
 			_ = c.write(protocol.Envelope{Event: "answer", Data: ans})
 		case "candidate":
 			var ic webrtc.ICECandidateInit

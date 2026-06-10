@@ -10,6 +10,9 @@ on:
         required: true
         default: 'v0.0.0-dev'
 
+env:
+  DESKTOP_TARGET: x86_64-pc-windows-msvc
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -36,11 +39,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ env.DESKTOP_TARGET }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      - name: Test desktop shell
+        working-directory: src-tauri
+        run: cargo test --target $env:DESKTOP_TARGET
 
       - name: Resolve tag
         id: tag
@@ -106,5 +113,5 @@ jobs:
           releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: false
           prerelease: false
-          args: --target x86_64-pc-windows-msvc
+          args: --target ${{ env.DESKTOP_TARGET }}
           updaterJsonPreferNsis: true
