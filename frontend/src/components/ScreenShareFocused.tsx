@@ -3,7 +3,7 @@ import { Volume2, VolumeX, X } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
-import { useVideoFps } from '../screenshare/useVideoFps';
+import { useVideoFps, useVideoStream } from '../screenshare/useVideoFps';
 
 type Props = {
   onClose: () => void;
@@ -31,7 +31,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
-  const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
+  const videoSize = useVideoStream(videoRef, videoStream);
   const fps = useVideoFps(videoRef, videoStream);
 
   const initialVolume = useMemo(() => {
@@ -44,28 +44,6 @@ export function ScreenShareFocused({ onClose }: Props) {
   useEffect(() => {
     setVolume(initialVolume);
   }, [initialVolume]);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-    el.srcObject = videoStream;
-    // muted required for autoplay unlock; system audio is routed through the sibling <audio>.
-    el.muted = true;
-    el.play().catch(() => {});
-
-    setVideoSize(null);
-    const update = () => {
-      if (!el.videoWidth || !el.videoHeight) return;
-      setVideoSize({ w: el.videoWidth, h: el.videoHeight });
-    };
-    update();
-    el.addEventListener('loadedmetadata', update);
-    el.addEventListener('resize', update);
-    return () => {
-      el.removeEventListener('loadedmetadata', update);
-      el.removeEventListener('resize', update);
-    };
-  }, [videoStream]);
 
   useEffect(() => {
     const el = audioRef.current;

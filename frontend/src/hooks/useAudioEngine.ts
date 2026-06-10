@@ -24,10 +24,6 @@ import { isCaptureEngine, preloadEngine } from '../audio/engine';
 
 const LOCAL_SPEAKING_ID = 'local';
 
-function stopStream(stream: MediaStream | null | undefined): void {
-  stream?.getTracks().forEach((t) => t.stop());
-}
-
 function getAudioSender(pc: RTCPeerConnection | null): RTCRtpSender | null {
   return pc?.getSenders().find((s) => s.track?.kind === 'audio') ?? null;
 }
@@ -125,7 +121,7 @@ export function useAudioEngine() {
 
   const clearRawMic = useCallback(() => {
     const r = refs.current;
-    stopStream(r.rawLocalStream);
+    r.rawLocalStream?.getTracks().forEach((t) => t.stop());
     r.rawLocalStream = null;
     r.rawLocalStreamUsesBrowserNs = null;
   }, []);

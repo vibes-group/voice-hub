@@ -301,15 +301,16 @@ func expectEncodeLayers(t *testing.T, p *peer, event string, timeout time.Durati
 	return payload.Layers
 }
 
-// TestSendScreenEncodePauseWritesToPublisher confirms the helper writes the
+// TestSendScreenEncodeEnvelopeWritesToPublisher confirms the helper writes the
 // expected envelope to the publisher's outbound queue and that absent
 // publishers are a no-op (not a panic).
-func TestSendScreenEncodePauseWritesToPublisher(t *testing.T) {
+func TestSendScreenEncodeEnvelopeWritesToPublisher(t *testing.T) {
 	t.Parallel()
 	room, pub, _, cleanup := newResumeTestRoom(t, "tok")
 	defer cleanup()
 
-	room.sendScreenEncodePause(pub.id, allScreenEncodeLayers)
+	room.sendScreenEncodeEnvelope(pub.id, "screen-share-encode-pause",
+		protocol.ScreenShareEncodePauseData{Layers: allScreenEncodeLayers})
 	layers := expectEncodeLayers(t, pub, "screen-share-encode-pause", 200*time.Millisecond)
 	if len(layers) != 3 || layers[0] != 0 || layers[2] != 2 {
 		t.Errorf("layers = %v, want [0 1 2]", layers)
@@ -317,7 +318,8 @@ func TestSendScreenEncodePauseWritesToPublisher(t *testing.T) {
 
 	// No-op for unknown publisher — must not panic, must not block on a
 	// channel that doesn't exist.
-	room.sendScreenEncodePause("ghost", allScreenEncodeLayers)
+	room.sendScreenEncodeEnvelope("ghost", "screen-share-encode-pause",
+		protocol.ScreenShareEncodePauseData{Layers: allScreenEncodeLayers})
 }
 
 // TestRemoveScreenSubscriberEmitsPauseOnLastUnsubscribe verifies the 1→0

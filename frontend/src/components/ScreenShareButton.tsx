@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { ChevronDown, ScreenShare, ScreenShareOff } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
-import { useVideoFps } from '../screenshare/useVideoFps';
+import { useVideoFps, useVideoStream } from '../screenshare/useVideoFps';
 import { ScreenShareSettings } from './ScreenShareSettings';
 import type { ShareMode } from '../screenshare/params';
 
@@ -102,30 +102,8 @@ function SelfPreview({
   videoCodec: 'av1' | 'vp9' | null;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
+  const videoSize = useVideoStream(videoRef, stream);
   const fps = useVideoFps(videoRef, stream);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) return;
-    el.srcObject = stream;
-    // muted required for autoplay; this is a local preview, no audio needed.
-    el.muted = true;
-    el.play().catch(() => {});
-
-    setVideoSize(null);
-    const update = () => {
-      if (!el.videoWidth || !el.videoHeight) return;
-      setVideoSize({ w: el.videoWidth, h: el.videoHeight });
-    };
-    update();
-    el.addEventListener('loadedmetadata', update);
-    el.addEventListener('resize', update);
-    return () => {
-      el.removeEventListener('loadedmetadata', update);
-      el.removeEventListener('resize', update);
-    };
-  }, [stream]);
 
   const qualityLabel = videoSize ? `${videoSize.w}×${videoSize.h}` : null;
   const fpsLabel = fps !== null ? `${Math.round(fps)}fps` : null;

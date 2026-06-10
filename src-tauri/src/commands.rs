@@ -4,7 +4,6 @@ use tauri::{AppHandle, State};
 
 use crate::listener::{Mode, SharedState};
 use crate::shortcut::{self, InputBinding};
-use crate::tray_flash;
 
 #[tauri::command]
 pub fn get_shortcut(state: State<'_, SharedState>) -> Option<InputBinding> {
@@ -55,9 +54,4 @@ pub fn cancel_capture(state: State<'_, SharedState>) {
         }
         Err(err) => log::error!("cancel_capture: state mutex poisoned: {err}"),
     }
-}
-
-#[tauri::command]
-pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), String> {
-    tray_flash::flash_attention(app, tray, window)
 }

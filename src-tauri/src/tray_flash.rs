@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::image::Image;
 use tauri::{AppHandle, Manager, UserAttentionType};
-use log::{error, info, warn};
+use log::{error, warn};
 
 use crate::tray::TRAY_ID;
 
@@ -26,9 +26,8 @@ impl TrayFlashState {
     }
 }
 
+#[tauri::command]
 pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), String> {
-    info!("tray_flash: invoked tray={tray} window={window}");
-
     if !tray && !window {
         return Ok(());
     }
@@ -46,7 +45,6 @@ pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), S
     };
 
     if focused {
-        info!("tray_flash: skipped, window focused");
         return Ok(());
     }
 
@@ -58,10 +56,7 @@ pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), S
     if tray {
         if let Some(tray_handle) = app.tray_by_id(TRAY_ID) {
             match tray_handle.set_icon(Some(inner.alert.clone())) {
-                Ok(()) => {
-                    info!("tray_flash: alert tray icon applied");
-                    inner.tray_active = true;
-                }
+                Ok(()) => inner.tray_active = true,
                 Err(e) => error!("tray_flash: tray set_icon failed: {e}"),
             }
         }
@@ -70,10 +65,7 @@ pub fn flash_attention(app: AppHandle, tray: bool, window: bool) -> Result<(), S
     if window {
         if let Some(w) = main.as_ref() {
             match w.set_icon(inner.alert.clone()) {
-                Ok(()) => {
-                    info!("tray_flash: alert window icon applied");
-                    inner.window_icon_active = true;
-                }
+                Ok(()) => inner.window_icon_active = true,
                 Err(e) => error!("tray_flash: window set_icon failed: {e}"),
             }
             if let Err(e) = w.request_user_attention(Some(UserAttentionType::Informational)) {
@@ -98,9 +90,8 @@ pub fn revert_if_active(app: &AppHandle) -> Result<(), String> {
 
     if inner.tray_active {
         if let Some(tray_handle) = app.tray_by_id(TRAY_ID) {
-            match tray_handle.set_icon(Some(inner.normal.clone())) {
-                Ok(()) => info!("tray_flash: tray icon reverted on focus"),
-                Err(e) => error!("tray_flash: tray revert set_icon failed: {e}"),
+            if let Err(e) = tray_handle.set_icon(Some(inner.normal.clone())) {
+                error!("tray_flash: tray revert set_icon failed: {e}");
             }
         }
         inner.tray_active = false;
@@ -108,9 +99,8 @@ pub fn revert_if_active(app: &AppHandle) -> Result<(), String> {
 
     if inner.window_icon_active {
         if let Some(w) = app.get_webview_window("main") {
-            match w.set_icon(inner.normal.clone()) {
-                Ok(()) => info!("tray_flash: window icon reverted on focus"),
-                Err(e) => error!("tray_flash: window revert set_icon failed: {e}"),
+            if let Err(e) = w.set_icon(inner.normal.clone()) {
+                error!("tray_flash: window revert set_icon failed: {e}");
             }
         }
         inner.window_icon_active = false;

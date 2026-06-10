@@ -11,7 +11,7 @@ const CAPTURE_ENGINE_LABELS = {
   browser: 'Браузерное',
 } as const satisfies Record<Exclude<EngineKind, 'off' | DenoiserId>, string>;
 
-export const CAPTURE_ENGINE_IDS = Object.keys(CAPTURE_ENGINE_LABELS) as Exclude<
+const CAPTURE_ENGINE_IDS = Object.keys(CAPTURE_ENGINE_LABELS) as Exclude<
   EngineKind,
   'off' | DenoiserId
 >[];

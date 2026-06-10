@@ -10,8 +10,6 @@ export const DENOISERS: Record<DenoiserId, Denoiser> = {
   rnnoise,
 };
 
-export const DENOISER_IDS = Object.keys(DENOISERS) as DenoiserId[];
-
 export function getDenoiser(id: string): Denoiser | null {
   return id in DENOISERS ? DENOISERS[id as DenoiserId] : null;
 }

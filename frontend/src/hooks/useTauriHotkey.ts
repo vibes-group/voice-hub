@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
 import { defaultBinding, formatBinding, type InputBinding } from '../utils/binding';
@@ -12,11 +12,6 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
   const setShortcut = useStore((s) => s.setShortcut);
   const [capturing, setCapturing] = useState(false);
   const [liveKeys, setLiveKeys] = useState<string[]>([]);
-  const capturingRef = useRef(false);
-
-  useEffect(() => {
-    capturingRef.current = capturing;
-  }, [capturing]);
 
   // Initial load + listen for capture events from rdev. Rust currently emits
   // `input-captured` for mouse only (keyboard capture happens in the webview
@@ -53,17 +48,17 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
   }, [onStatusMessage, setShortcut]);
 
   const cancel = useCallback(async () => {
-    if (!capturingRef.current) return;
+    if (!capturing) return;
     setCapturing(false);
     try {
       await invoke('cancel_capture');
     } catch (err) {
       console.error('cancel_capture failed', err);
     }
-  }, []);
+  }, [capturing]);
 
   const start = useCallback(async () => {
-    if (capturingRef.current) return;
+    if (capturing) return;
     setCapturing(true);
     try {
       await invoke('start_capture');
@@ -71,7 +66,7 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
       console.error('start_capture failed', err);
       setCapturing(false);
     }
-  }, []);
+  }, [capturing]);
 
   const onCommit = useMemo(
     () => async (b: InputBinding) => {

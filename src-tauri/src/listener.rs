@@ -197,7 +197,7 @@ fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
     finalize_capture(state, app, binding);
 }
 
-pub fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: InputBinding) {
+fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: InputBinding) {
     if let Err(err) = shortcut::save(app, Some(&binding)) {
         log::error!("save shortcut: {err}");
     }

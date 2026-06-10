@@ -15,6 +15,35 @@ import (
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
+// readSSEFrame reads one SSE event frame from r, returning the event name and
+// raw data bytes. Returns io.EOF when the stream ends.
+func readSSEFrame(r *bufio.Reader) (event string, data []byte, err error) {
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if event != "" || data != nil {
+				return event, data, nil
+			}
+			continue
+		}
+		if len(line) > 0 && line[0] == ':' {
+			// SSE comment (e.g. ": heartbeat") — skip
+			continue
+		}
+		field, value, _ := strings.Cut(line, ": ")
+		switch field {
+		case "event":
+			event = value
+		case "data":
+			data = []byte(value)
+		}
+	}
+}
+
 type fakeRoom struct {
 	mu    sync.Mutex
 	peers []protocol.PeerInfo

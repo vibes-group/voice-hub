@@ -76,10 +76,6 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-pub async fn check_on_focus(app: AppHandle) {
-    check(app, /* force */ false).await;
-}
-
 /// Snapshot the version of the currently pending update, if any.
 /// Used by the tray to preserve the "Install vX.Y.Z" item across menu rebuilds
 /// triggered by unrelated state changes (e.g. autostart toggle).
@@ -89,33 +85,24 @@ pub fn pending_version(app: &AppHandle) -> Option<String> {
     s.pending.as_ref().map(|u| u.version.clone())
 }
 
-/// Force an immediate update check. Called from the tray "Check for updates"
-/// item so it must be `pub`.
-pub async fn check_forced(app: AppHandle) {
-    check(app, /* force */ true).await;
-}
-
-async fn check(app: AppHandle, force: bool) {
+/// Check for an update; `force` skips the focus throttle.
+pub async fn check(app: AppHandle, force: bool) {
     let shared: SharedUpdater = match app.try_state::<SharedUpdater>() {
         Some(s) => s.inner().clone(),
         None => return,
     };
 
-    if !force {
-        match shared.lock() {
-            Ok(s) => {
+    match shared.lock() {
+        Ok(mut s) => {
+            if !force {
                 if let Some(prev) = s.last_checked {
                     if prev.elapsed() < FOCUS_THROTTLE {
                         return;
                     }
                 }
             }
-            Err(err) => log::error!("updater: state mutex poisoned (focus throttle): {err}"),
+            s.last_checked = Some(Instant::now());
         }
-    }
-
-    match shared.lock() {
-        Ok(mut s) => s.last_checked = Some(Instant::now()),
         Err(err) => log::error!("updater: state mutex poisoned (last_checked): {err}"),
     }
 
@@ -180,46 +167,25 @@ async fn check(app: AppHandle, force: bool) {
 // This keeps the logic unit-testable without a real AppHandle.
 // ---------------------------------------------------------------------------
 
-fn lock_or_recover<'a, T>(mutex: &'a Mutex<T>, context: &str) -> std::sync::MutexGuard<'a, T> {
-    mutex.lock().unwrap_or_else(|p| {
-        log::error!("updater: {context} mutex poisoned, recovering");
-        p.into_inner()
-    })
-}
-
 async fn run_install<FP, FI>(update: Update, on_progress: FP, on_installing: FI) -> Result<(), String>
 where
     FP: Fn(u64, Option<u64>) + Send + 'static,
     FI: Fn() + Send + 'static,
 {
-    let downloaded = Arc::new(Mutex::new(0u64));
-    let last_emit = Arc::new(Mutex::new(Instant::now() - PROGRESS_EMIT_THROTTLE));
+    let mut downloaded: u64 = 0;
+    let mut last_emit = Instant::now() - PROGRESS_EMIT_THROTTLE;
 
     update
         .download_and_install(
             move |chunk_len, content_len| {
-                let total = {
-                    let mut d = lock_or_recover(&downloaded, "downloaded counter");
-                    *d += chunk_len as u64;
-                    *d
-                };
-                let should_emit = {
-                    let mut t = lock_or_recover(&last_emit, "last_emit throttle");
-                    let done = content_len.map(|c| total >= c).unwrap_or(false);
-                    if done || t.elapsed() >= PROGRESS_EMIT_THROTTLE {
-                        *t = Instant::now();
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if should_emit {
-                    on_progress(total, content_len);
+                downloaded += chunk_len as u64;
+                let done = content_len.map(|c| downloaded >= c).unwrap_or(false);
+                if done || last_emit.elapsed() >= PROGRESS_EMIT_THROTTLE {
+                    last_emit = Instant::now();
+                    on_progress(downloaded, content_len);
                 }
             },
-            move || {
-                on_installing();
-            },
+            on_installing,
         )
         .await
         .map_err(|e| format!("install: {e}"))

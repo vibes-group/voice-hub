@@ -124,7 +124,8 @@ fn refresh_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn show_main<R: Runtime>(app: &AppHandle<R>) {
+/// Bring the main window to the front: unminimize, show, focus.
+pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         if let Err(err) = window.unminimize() {
             log::warn!("show_main: unminimize failed: {err}");
@@ -144,7 +145,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         ITEM_CHECK => {
             let h = app.clone();
             tauri::async_runtime::spawn(async move {
-                updater::check_forced(h).await;
+                updater::check(h, /* force */ true).await;
             });
         }
         ITEM_UPDATE => {

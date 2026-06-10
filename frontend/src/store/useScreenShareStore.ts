@@ -8,7 +8,7 @@
 
 import { create } from 'zustand';
 
-export type ScreenVideoCodec = 'av1' | 'vp9';
+import type { ScreenVideoCodec } from '../sfu/protocol';
 
 /** One active screen share announced by the server. */
 export type ScreenShare = {

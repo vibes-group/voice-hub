@@ -63,11 +63,6 @@ function parsePeerLeft(data: unknown): { room: RoomSlug; id: string } | null {
   return { room, id };
 }
 
-// peer-updated with unknown id is treated as insert (idempotent with joined).
-function parsePeerUpdated(data: unknown): { room: RoomSlug; peer: PeerSummary } | null {
-  return parsePeerJoined(data);
-}
-
 // Browsers signal permanent failure (non-2xx) by closing EventSource with
 // readyState CLOSED. Probe /api/config to distinguish auth failure from other
 // permanent errors; 401 → redirect to login (mirrors loadAppConfig behavior).
@@ -121,7 +116,8 @@ function openEventSource(
   });
 
   es.addEventListener('presence-peer-updated', (e: MessageEvent) => {
-    const parsed = parsePeerUpdated(JSON.parse(e.data));
+    // peer-updated with unknown id is treated as insert (idempotent with joined).
+    const parsed = parsePeerJoined(JSON.parse(e.data));
     if (parsed) {
       const { room, peer } = parsed;
       setPeers((prev) => ({

@@ -371,11 +371,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     }
   }
 
-  async function handleOffer(
-    data: ServerMessage & { event: 'offer' } extends never
-      ? never
-      : Extract<ServerMessage, { event: 'offer' }>['data'],
-  ): Promise<void> {
+  async function handleOffer(data: Extract<ServerMessage, { event: 'offer' }>['data']): Promise<void> {
     switch (data.pc) {
       case 'audio': {
         if (!pc) return;

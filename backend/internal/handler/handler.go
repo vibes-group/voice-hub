@@ -74,16 +74,8 @@ func FrontendVersion(webDir string) string {
 
 func Health() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := json.Marshal(HealthResponse{Status: "ok"})
-		if err != nil {
-			log.Printf("health: encode: %v", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write(append(body, '\n')); err != nil {
+		if err := json.NewEncoder(w).Encode(HealthResponse{Status: "ok"}); err != nil {
 			log.Printf("health: write: %v", err)
 		}
 	}

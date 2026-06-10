@@ -1,4 +1,3 @@
-import { useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { selectChatOnlyParticipants, selectVoiceParticipants, useStore } from '../store/useStore';
 import { ParticipantRow } from './ParticipantRow';
@@ -12,14 +11,11 @@ interface Props {
 }
 
 export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect }: Props) {
-  const noopGainChange = useCallback(() => undefined, []);
   const participants = useStore(useShallow(selectVoiceParticipants));
   const lurkers = useStore(useShallow(selectChatOnlyParticipants));
   const joinState = useStore((s) => s.joinState);
   const roomSlug = useStore((s) => s.roomSlug);
   const roomPeers = useRoomPeers();
-
-  const showEmpty = participants.length === 0;
 
   const liveCount = participants.length;
 
@@ -116,7 +112,7 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
           )}
         </div>
         <div id="participants" className="grid gap-2">
-          {showEmpty && (
+          {liveCount === 0 && (
             <div className="px-4 py-6 text-center text-muted-2 border border-dashed border-line bg-bg-0 text-[12px] uppercase tracking-[0.12em]">
               Пока никого нет
             </div>
@@ -145,7 +141,7 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
               <ParticipantRow
                 key={p.id}
                 participant={p}
-                onRemoteGainChange={noopGainChange}
+                onRemoteGainChange={onRemoteGainChange}
                 onPing={onPingUser}
               />
             ))}

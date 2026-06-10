@@ -513,25 +513,14 @@ func (r *Room) firstScreenVideoReady(p *peer, session *ScreenShareSession) {
 	idle := len(session.subscribers) == 0
 	session.mu.RUnlock()
 	if idle {
-		r.sendScreenEncodePause(session.PublisherID, allScreenEncodeLayers)
+		r.sendScreenEncodeEnvelope(session.PublisherID, "screen-share-encode-pause",
+			protocol.ScreenShareEncodePauseData{Layers: allScreenEncodeLayers})
 	}
 }
 
-// sendScreenEncodePause notifies the publisher that the listed temporal
-// layers can stop encoding. Layers=[0,1,2] means full pause. No-op if the
-// publisher peer is no longer in the room.
-func (r *Room) sendScreenEncodePause(publisherID string, layers []int) {
-	r.sendScreenEncodeEnvelope(publisherID, "screen-share-encode-pause",
-		protocol.ScreenShareEncodePauseData{Layers: layers})
-}
-
-// sendScreenEncodeResume is the counterpart: tells the publisher to resume
-// encoding the listed layers.
-func (r *Room) sendScreenEncodeResume(publisherID string, layers []int) {
-	r.sendScreenEncodeEnvelope(publisherID, "screen-share-encode-resume",
-		protocol.ScreenShareEncodeResumeData{Layers: layers})
-}
-
+// sendScreenEncodeEnvelope tells the publisher to pause or resume encoding
+// the listed temporal layers. Layers=[0,1,2] means full pause/resume. No-op
+// if the publisher peer is no longer in the room.
 func (r *Room) sendScreenEncodeEnvelope(publisherID, event string, payload any) {
 	r.mu.Lock()
 	pubPeer := r.peers[publisherID]
@@ -648,7 +637,8 @@ func (r *Room) removeScreenSubscriber(sub *peer, publisherID, reason string) {
 		session.mu.Unlock()
 	}
 	if wentIdle {
-		r.sendScreenEncodePause(publisherID, allScreenEncodeLayers)
+		r.sendScreenEncodeEnvelope(publisherID, "screen-share-encode-pause",
+			protocol.ScreenShareEncodePauseData{Layers: allScreenEncodeLayers})
 	}
 
 	log.Printf("sfu: screen unsubscribe (%s→%s) %s", sub.id, publisherID, reason)
@@ -807,9 +797,7 @@ func (r *Room) sendScreenShareError(p *peer, publisherID string, reason protocol
 }
 
 // screenSubPC is the per-publisher subscriber-side bookkeeping a subscriber
-// peer keeps. Field set is intentionally small: cleanup needs pc, routing
-// needs publisherID.
+// peer keeps; the publisher ID lives in the screenSubs map key.
 type screenSubPC struct {
-	publisherID string
-	pc          *webrtc.PeerConnection
+	pc *webrtc.PeerConnection
 }

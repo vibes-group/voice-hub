@@ -6,7 +6,7 @@ description = "Desktop shell for Voice Hub built with Tauri"
 
 [lib]
 name = "voice_hub_desktop_lib"
-crate-type = ["cdylib", "rlib", "staticlib"]
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

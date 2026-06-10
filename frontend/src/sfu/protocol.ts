@@ -11,11 +11,6 @@
 
 // Shared
 
-export type Envelope = {
-  event: string;
-  data: unknown;
-};
-
 /**
  * PCKind discriminates the RTCPeerConnection role every offer / answer /
  * candidate message targets. Required on every signaling message — a missing
@@ -26,12 +21,6 @@ export type Envelope = {
  *  - screen-sub  → a subscriber PC scoped to one publisher (publisherId required)
  */
 export type PCKind = 'audio' | 'screen-pub' | 'screen-sub';
-
-/** Discriminated union form used by router switch statements. */
-export type PCDisc =
-  | { pc: 'audio' }
-  | { pc: 'screen-pub' }
-  | { pc: 'screen-sub'; publisherId: string };
 
 /**
  * Wire shape of "offer" / "answer" data: SessionDescription fields hoisted

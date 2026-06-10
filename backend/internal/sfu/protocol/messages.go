@@ -139,19 +139,11 @@ type WelcomePayload struct {
 	Peers []PeerInfo `json:"peers"`
 }
 
-// PeerJoinedPayload is the data field of the "peer-joined" message.
-// It reuses PeerInfo directly — no additional wrapper.
-// type alias kept for documentation; callers use PeerInfo.
-
 // PeerLeftPayload is the data field of the "peer-left" message. Only the
 // peer ID is carried; display name is intentionally absent.
 type PeerLeftPayload struct {
 	ID string `json:"id"`
 }
-
-// PeerInfoPayload is the data field of the "peer-info" message, broadcast
-// when a peer calls set-displayname mid-session.
-// It reuses PeerInfo directly — no additional wrapper.
 
 // --- Client → Server payloads ---
 
@@ -398,10 +390,6 @@ type ScreenShareStartData struct {
 	HasSystemAudio bool            `json:"hasSystemAudio"`
 	Mode           ScreenShareMode `json:"mode,omitempty"`
 }
-
-// ScreenShareStopData — C→S. Empty payload by design: a peer publishes at
-// most one screen share at a time, so the WS connection alone disambiguates.
-type ScreenShareStopData struct{}
 
 // ScreenShareResumeData — C→S. Sent after a WS reconnect to reattach to a
 // publisher session that is still alive in the server's grace window.

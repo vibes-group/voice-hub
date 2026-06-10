@@ -281,7 +281,7 @@ export const useStore = create<AppState>((set, get) => ({
         const stored = loadPeerLabel(merged.clientId);
         if (stored) merged.localLabel = stored;
       }
-      let next = { ...s.participants, [partial.id]: merged };
+      const next = { ...s.participants, [partial.id]: merged };
       // Mirror server-side eviction: a peer arriving with a clientId already
       // held by another entry replaces that entry (e.g. voice → lurker
       // transition where peer-joined Y can race peer-left X). Keeps the
@@ -289,8 +289,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (partial.clientId) {
         for (const id of Object.keys(next)) {
           if (id !== partial.id && next[id].clientId === partial.clientId) {
-            const { [id]: _evicted, ...rest } = next;
-            next = rest;
+            delete next[id];
           }
         }
       }
@@ -301,7 +300,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
   removeParticipant: (id) =>
     set((s) => {
-      const { [id]: _removed, ...rest } = s.participants;
+      const rest = { ...s.participants };
+      delete rest[id];
       return { participants: rest };
     }),
   clearParticipants: () => set({ participants: {} }),

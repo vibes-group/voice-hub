@@ -224,7 +224,11 @@ func wireRoutes(
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/", middleware.SecurityHeaders(middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir)))))
+	htmlRoutes := middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir)))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Permissions-Policy", "geolocation=(), payment=()")
+		htmlRoutes.ServeHTTP(w, req)
+	}))
 	mux.HandleFunc("GET /healthz", handler.Health())
 	mux.HandleFunc("GET /api/version", handler.Version(version))
 	mux.HandleFunc("POST /api/login", handler.Login(handler.LoginConfig{

@@ -125,10 +125,7 @@ func (r *Room) finishScreenSubSetup(
 	session.mu.Unlock()
 
 	r.mu.Lock()
-	sub.screenSubs[session.PublisherID] = &screenSubPC{
-		publisherID: session.PublisherID,
-		pc:          pc,
-	}
+	sub.screenSubs[session.PublisherID] = &screenSubPC{pc: pc}
 	r.mu.Unlock()
 
 	go r.forwardScreenVideoRTCPToPublisher(session, subEntry, subEntry.videoSender)
@@ -154,7 +151,8 @@ func (r *Room) finishScreenSubSetup(
 		sub.id, session.PublisherID, subEntry.targetTemp.Load(), firstSubscriber)
 
 	if firstSubscriber {
-		r.sendScreenEncodeResume(session.PublisherID, allScreenEncodeLayers)
+		r.sendScreenEncodeEnvelope(session.PublisherID, "screen-share-encode-resume",
+			protocol.ScreenShareEncodeResumeData{Layers: allScreenEncodeLayers})
 		session.requestKeyframe()
 	}
 }
@@ -195,7 +193,7 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 	}
 	subEntry.chain = NewChainTracker(int(target))
 	subEntry.targetTemp.Store(target)
-	subEntry.seqCounter.Store(uint32(uint16(seqSeed())))
+	subEntry.seqCounter.Store(seqSeed())
 
 	r.finishScreenSubSetup(sub, session, pc, subEntry, offer)
 }

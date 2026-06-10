@@ -1,6 +1,6 @@
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { ScreenShareTile } from './ScreenShareTile';
-import { useStore } from '../store/useStore';
+import { selectSelfPeerId, useStore } from '../store/useStore';
 
 type Props = {
   onTileClick: (publisherId: string) => void;
@@ -8,12 +8,7 @@ type Props = {
 
 export function ScreenShareGallery({ onTileClick }: Props) {
   const shares = useScreenShareStore((s) => s.shares);
-  const selfId = useStore((s) => {
-    for (const [id, p] of Object.entries(s.participants)) {
-      if (p.isSelf) return id;
-    }
-    return null;
-  });
+  const selfId = useStore(selectSelfPeerId);
 
   const list = Array.from(shares.values()).filter((share) => share.publisherId !== selfId);
   if (list.length === 0) return null;

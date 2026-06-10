@@ -74,17 +74,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                if let Err(err) = w.unminimize() {
-                    log::warn!("single-instance: unminimize failed: {err}");
-                }
-                if let Err(err) = w.show() {
-                    log::warn!("single-instance: show failed: {err}");
-                }
-                if let Err(err) = w.set_focus() {
-                    log::warn!("single-instance: set_focus failed: {err}");
-                }
-            }
+            tray::show_main(app);
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -103,7 +93,7 @@ pub fn run() {
             connection::set_host,
             connection::change_server,
             updater::apply_update,
-            commands::flash_attention,
+            tray_flash::flash_attention,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -132,7 +122,7 @@ pub fn run() {
                         }
                         let app = window.app_handle().clone();
                         tauri::async_runtime::spawn(async move {
-                            updater::check_on_focus(app).await;
+                            updater::check(app, /* force */ false).await;
                         });
                     }
                 }
