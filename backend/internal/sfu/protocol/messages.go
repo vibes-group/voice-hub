@@ -285,11 +285,45 @@ type PingServer struct {
 // len([]byte(text)) not len([]rune(text)).
 const ChatMaxBytes = 2000
 
+// ChatMaxAttachments caps how many attachments one chat message may carry.
+const ChatMaxAttachments = 10
+
+// AttachmentKind discriminates how the client renders an attachment: "image"
+// gets an inline preview + lightbox, "file" gets a download card.
+type AttachmentKind string
+
+const (
+	AttachmentImage AttachmentKind = "image"
+	AttachmentFile  AttachmentKind = "file"
+)
+
+// Attachment is the lightweight metadata for one chat attachment carried on the
+// WebSocket. The bytes themselves never travel over the WS — they are uploaded
+// and downloaded over HTTP, addressed by UploadID. The server validates that
+// UploadID refers to a live upload in the same room but otherwise relays the
+// client-supplied fields verbatim.
+//
+// Width/Height/BlurThumb are image-only hints used to reserve layout space and
+// show a placeholder before the full image resolves. BlurThumb is a tiny
+// base64 JPEG data URL (well under 1KB by construction).
+type Attachment struct {
+	UploadID  string         `json:"uploadId"`
+	Kind      AttachmentKind `json:"kind"`
+	Name      string         `json:"name"`
+	MIME      string         `json:"mime"`
+	Size      int64          `json:"size"`
+	Width     int            `json:"width,omitempty"`
+	Height    int            `json:"height,omitempty"`
+	BlurThumb string         `json:"blurThumb,omitempty"`
+}
+
 // ChatSendPayload is the data field of the "chat-send" C→S message.
 // It is rejected by the server if:
 //   - the peer has not yet sent "hello" (hello is required session-init)
-//   - Text is empty after trimming whitespace
-//   - len([]byte(Text)) > ChatMaxBytes
+//   - Text is empty after trimming whitespace AND there are no attachments
+//   - len([]byte(Text)) > ChatMaxBytes (the limit applies to text only;
+//     attachment metadata is not counted against it)
+//   - len(Attachments) > ChatMaxAttachments, or any attachment fails validation
 //
 // ClientMsgID is a client-generated opaque dedup key (recommended: UUIDv4 or
 // similar random string). The server echoes it unchanged in the ChatPayload
@@ -297,8 +331,9 @@ const ChatMaxBytes = 2000
 // canonical server-assigned ID and timestamp. No uniqueness guarantee is
 // enforced server-side; clients must treat it as advisory only.
 type ChatSendPayload struct {
-	Text        string `json:"text"`
-	ClientMsgID string `json:"clientMsgId"`
+	Text        string       `json:"text"`
+	ClientMsgID string       `json:"clientMsgId"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // ChatPayload is the data field of the "chat" S→C message. The server
@@ -332,12 +367,13 @@ type ChatSendPayload struct {
 // both are available, since the server snapshot is authoritative at send time.
 // Omitted from JSON when empty (older server versions or empty display names).
 type ChatPayload struct {
-	ID          string `json:"id"`
-	From        string `json:"from"`
-	Text        string `json:"text"`
-	Ts          int64  `json:"ts"`
-	ClientMsgID string `json:"clientMsgId,omitempty"`
-	SenderName  string `json:"senderName,omitempty"`
+	ID          string       `json:"id"`
+	From        string       `json:"from"`
+	Text        string       `json:"text"`
+	Ts          int64        `json:"ts"`
+	ClientMsgID string       `json:"clientMsgId,omitempty"`
+	SenderName  string       `json:"senderName,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // --- Screen share ---

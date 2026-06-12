@@ -24,6 +24,7 @@ import {
   type PersistedChatMessage,
 } from '../utils/storage';
 import type { RoomSlug } from '../rooms';
+import type { Attachment } from '../sfu/protocol';
 
 export type ChatMessage = PersistedChatMessage;
 
@@ -36,6 +37,23 @@ function compareParticipants(a: ParticipantUI, b: ParticipantUI): number {
   // Stable by clientId (per-install) so renames don't reorder. Fallback to
   // peer id for peers without a clientId.
   return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
+}
+
+// Patches the pending message matching clientMsgId; returns {} (a no-op slice)
+// when it's already been reconciled away.
+function patchPendingMessage(
+  state: AppState,
+  roomId: string,
+  clientMsgId: string,
+  patch: Partial<ChatMessage>,
+): Partial<AppState> {
+  const existing = state.chatByRoom[roomId];
+  if (!existing) return {};
+  const idx = existing.findIndex((m) => m.clientMsgId === clientMsgId && m.pending);
+  if (idx < 0) return {};
+  const next = [...existing];
+  next[idx] = { ...next[idx], ...patch };
+  return { chatByRoom: { ...state.chatByRoom, [roomId]: next } };
 }
 
 type SortedCache = {
@@ -147,8 +165,22 @@ export interface AppState {
   chatSendOptimistic: (roomId: string, msg: ChatMessage) => void;
   // Reconcile server echo: replace pending entry matching clientMsgId, or append.
   chatReceive: (roomId: string, msg: ChatMessage) => void;
+  // Update aggregate attachment-upload progress (0..1) on a pending message.
+  chatUpdateUploadProgress: (roomId: string, clientMsgId: string, progress: number) => void;
+  // Flag a pending message whose attachment upload failed (shows retry).
+  chatMarkUploadFailed: (roomId: string, clientMsgId: string) => void;
+  // Swap a pending message's attachments for ones keyed by their real,
+  // server-assigned uploadIds once uploads complete.
+  chatSetAttachments: (roomId: string, clientMsgId: string, attachments: Attachment[]) => void;
+  // Mark attachments (by uploadId, across all rooms) as deleted — their bytes
+  // are gone locally, so they render as "deleted" and never re-fetch.
+  markAttachmentsDeleted: (uploadIds: string[]) => void;
   // Persist current history to localStorage (debounce externally).
   persistChat: (roomId: string) => void;
+  // True while the chat image lightbox is open, so global arrow-key handlers
+  // (e.g. screen-share switching) can yield to in-lightbox navigation.
+  chatLightboxOpen: boolean;
+  setChatLightboxOpen: (open: boolean) => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -334,8 +366,47 @@ export const useStore = create<AppState>((set, get) => ({
           : [...existing, msg];
       return { chatByRoom: { ...s.chatByRoom, [roomId]: next } };
     }),
+  chatUpdateUploadProgress: (roomId, clientMsgId, progress) =>
+    set((s) =>
+      patchPendingMessage(s, roomId, clientMsgId, {
+        uploadProgress: progress,
+        uploadFailed: false,
+      }),
+    ),
+  chatMarkUploadFailed: (roomId, clientMsgId) =>
+    set((s) => patchPendingMessage(s, roomId, clientMsgId, { uploadFailed: true })),
+  chatSetAttachments: (roomId, clientMsgId, attachments) =>
+    set((s) => patchPendingMessage(s, roomId, clientMsgId, { attachments })),
+  markAttachmentsDeleted: (uploadIds) => {
+    if (uploadIds.length === 0) return;
+    const gone = new Set(uploadIds);
+    const changedRooms: string[] = [];
+    set((s) => {
+      const chatByRoom = { ...s.chatByRoom };
+      for (const [roomId, msgs] of Object.entries(s.chatByRoom)) {
+        let roomChanged = false;
+        const next = msgs.map((m) => {
+          const newly = (m.attachments ?? [])
+            .map((a) => a.uploadId)
+            .filter((id) => gone.has(id) && !m.deletedUploadIds?.includes(id));
+          if (newly.length === 0) return m;
+          roomChanged = true;
+          return { ...m, deletedUploadIds: [...(m.deletedUploadIds ?? []), ...newly] };
+        });
+        if (roomChanged) {
+          chatByRoom[roomId] = next;
+          changedRooms.push(roomId);
+        }
+      }
+      return changedRooms.length ? { chatByRoom } : {};
+    });
+    for (const roomId of changedRooms)
+      saveChatHistory(roomId, useStore.getState().chatByRoom[roomId]);
+  },
   persistChat: (roomId) => {
     const msgs = useStore.getState().chatByRoom[roomId];
     if (msgs) saveChatHistory(roomId, msgs);
   },
+  chatLightboxOpen: false,
+  setChatLightboxOpen: (open) => set({ chatLightboxOpen: open }),
 }));

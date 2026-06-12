@@ -16,6 +16,7 @@ import (
 
 	"voice-hub/backend/internal/auth"
 	"voice-hub/backend/internal/config"
+	"voice-hub/backend/internal/filestore"
 	"voice-hub/backend/internal/handler"
 	"voice-hub/backend/internal/middleware"
 	"voice-hub/backend/internal/presence"
@@ -64,6 +65,21 @@ func main() {
 		log.Fatalf("connpass store: %v", err)
 	}
 
+	fileStore, err := filestore.New(filestore.Config{
+		TempDir:         cfg.UploadTempDir,
+		TTL:             cfg.UploadTTL,
+		TTLHardCap:      cfg.UploadTTLHardCap,
+		MaxUploadBytes:  cfg.UploadMaxBytes,
+		MaxTotalBytes:   cfg.UploadTotalBytes,
+		JanitorInterval: 30 * time.Second,
+	})
+	if err != nil {
+		log.Fatalf("file store: %v", err)
+	}
+	// Runs at process exit, after the explicit server.Shutdown + room close
+	// below have stopped all traffic into the store.
+	defer fileStore.Close()
+
 	// Sealed into admin cookies; rotating APP_ADMIN_PASSWORD requires restart,
 	// so any old admin cookie's AdminVersion will mismatch this and be rejected.
 	adminVer := auth.AdminPasswordVersion(sessionSecret, cfg.AdminPassword)
@@ -76,7 +92,7 @@ func main() {
 	stunURL := "stun:" + cfg.PublicIP + ":3478"
 	turnURL := "turn:" + cfg.PublicIP + ":3478?transport=udp"
 
-	rooms, presenceHub, err := buildRooms([]string{"room1", "room2", "room3"}, cfg, stunURL)
+	rooms, presenceHub, err := buildRooms([]string{"room1", "room2", "room3"}, cfg, stunURL, fileStore)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -99,7 +115,7 @@ func main() {
 	version := handler.FrontendVersion(cfg.WebDir)
 	log.Printf("frontend version: %s", version)
 
-	mux := wireRoutes(cfg, adminVer, version, connPass, wsRegistry, limiter, rooms, presenceHub, stunURL, turnURL)
+	mux := wireRoutes(cfg, adminVer, version, connPass, wsRegistry, limiter, rooms, presenceHub, fileStore, stunURL, turnURL)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -175,7 +191,7 @@ func loadSecrets(dataDir string) (sessionSecret, turnSecret []byte, err error) {
 }
 
 // buildRooms creates the SFU rooms and the presence hub that fans out peer events.
-func buildRooms(slugs []string, cfg config.Config, stunURL string) (map[string]*sfu.Room, *presence.Hub, error) {
+func buildRooms(slugs []string, cfg config.Config, stunURL string, fileStore *filestore.Store) (map[string]*sfu.Room, *presence.Hub, error) {
 	rooms := make(map[string]*sfu.Room, len(slugs))
 	hub := presence.New(func() map[string]presence.RoomLister {
 		out := make(map[string]presence.RoomLister, len(rooms))
@@ -194,6 +210,8 @@ func buildRooms(slugs []string, cfg config.Config, stunURL string) (map[string]*
 			OnPeerJoined:  func(p protocol.PeerInfo) { hub.PeerJoined(slug, p) },
 			OnPeerLeft:    func(id string) { hub.PeerLeft(slug, id) },
 			OnPeerUpdated: func(p protocol.PeerInfo) { hub.PeerUpdated(slug, p) },
+			RoomID:        slug,
+			FileStore:     fileStore,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("sfu init %q: %w", slug, err)
@@ -212,6 +230,7 @@ func wireRoutes(
 	limiter *auth.AuthLimiter,
 	rooms map[string]*sfu.Room,
 	presenceHub *presence.Hub,
+	fileStore *filestore.Store,
 	stunURL, turnURL string,
 ) *http.ServeMux {
 	resolveRoom := func(w http.ResponseWriter, req *http.Request) (*sfu.Room, bool) {
@@ -221,6 +240,10 @@ func wireRoutes(
 			return nil, false
 		}
 		return rm, true
+	}
+	roomExists := func(roomID string) bool {
+		_, ok := rooms[roomID]
+		return ok
 	}
 
 	mux := http.NewServeMux()
@@ -257,6 +280,8 @@ func wireRoutes(
 		StunURL:          stunURL,
 		TurnURL:          turnURL,
 	})))
+	mux.Handle("POST /api/upload", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.UploadFile(fileStore, roomExists)))
+	mux.Handle("GET /api/file/{uploadID}", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer, handler.DownloadFile(fileStore)))
 	mux.Handle("GET /api/admin/connection-passwords", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassStatus(connPass)))
 	mux.Handle("POST /api/admin/connection-passwords", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassCreate(cfg.AppHostname, connPass)))
 	mux.Handle("POST /api/admin/connection-passwords/{id}/rotate", middleware.RequireAdmin(cfg.SessionSecret, adminVer, handler.ConnPassRotate(cfg.AppHostname, connPass)))

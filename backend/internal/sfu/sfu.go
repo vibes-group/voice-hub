@@ -24,6 +24,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"voice-hub/backend/internal/filestore"
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
@@ -47,6 +48,11 @@ type Config struct {
 	OnPeerJoined  func(protocol.PeerInfo)
 	OnPeerLeft    func(id string)
 	OnPeerUpdated func(protocol.PeerInfo)
+	// RoomID is the room slug, used to scope attachment uploads to this room.
+	RoomID string
+	// FileStore backs chat attachments. When nil, attachment uploads are a
+	// disabled feature and chat messages carrying attachments are dropped.
+	FileStore *filestore.Store
 }
 
 func (cfg Config) originPatterns() []string {
@@ -845,19 +851,22 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 	}
 
 	text := strings.TrimSpace(cs.Text)
-	if text == "" {
-		slog.Debug("sfu: chat-send empty text, dropping", "peer", sender.id)
+	if text == "" && len(cs.Attachments) == 0 {
+		slog.Debug("sfu: chat-send empty, dropping", "peer", sender.id)
 		return
 	}
 	if len([]byte(text)) > protocol.ChatMaxBytes {
 		slog.Debug("sfu: chat-send oversized, dropping", "peer", sender.id, "bytes", len([]byte(text)))
 		return
 	}
+	if !r.attachmentsValid(sender, cs.Attachments) {
+		return
+	}
 
 	now := time.Now()
 	id := newChatID(now)
 
-	slog.Debug("sfu: chat", "id", id, "from", sender.id, "bytes", len([]byte(text)))
+	slog.Debug("sfu: chat", "id", id, "from", sender.id, "bytes", len([]byte(text)), "attachments", len(cs.Attachments))
 
 	payload, _ := json.Marshal(protocol.ChatPayload{
 		ID:          id,
@@ -866,6 +875,7 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 		Ts:          now.UnixMilli(),
 		ClientMsgID: cs.ClientMsgID,
 		SenderName:  sender.displayName,
+		Attachments: cs.Attachments,
 	})
 	env, _ := json.Marshal(protocol.Envelope{Event: "chat", Data: payload})
 
@@ -879,6 +889,35 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 	for _, p := range all {
 		_ = p.writeRaw(env)
 	}
+}
+
+// attachmentsValid reports whether every attachment refers to a live upload in
+// this room. An empty list is trivially valid. When attachments are present but
+// no file store is configured the message is rejected (feature disabled).
+func (r *Room) attachmentsValid(sender *peer, atts []protocol.Attachment) bool {
+	if len(atts) == 0 {
+		return true
+	}
+	if len(atts) > protocol.ChatMaxAttachments {
+		slog.Debug("sfu: chat-send too many attachments, dropping", "peer", sender.id, "count", len(atts))
+		return false
+	}
+	if r.cfg.FileStore == nil {
+		slog.Debug("sfu: chat-send with attachments but no file store, dropping", "peer", sender.id)
+		return false
+	}
+	for _, a := range atts {
+		if a.UploadID == "" || a.MIME == "" {
+			slog.Debug("sfu: chat-send attachment missing fields, dropping", "peer", sender.id)
+			return false
+		}
+		entry, ok := r.cfg.FileStore.Get(a.UploadID)
+		if !ok || entry.RoomID != r.cfg.RoomID {
+			slog.Debug("sfu: chat-send attachment not in room, dropping", "peer", sender.id, "uploadId", a.UploadID)
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Room) handlePing(p *peer, msg protocol.Envelope) {

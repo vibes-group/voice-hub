@@ -21,7 +21,7 @@ import {
   consumeRejoinFlag,
   loadOrCreateClientId,
 } from '../utils/storage';
-import type { ChatPayload, PingPayload } from '../sfu/protocol';
+import type { Attachment, ChatPayload, PingPayload } from '../sfu/protocol';
 import type { ShareMode } from '../screenshare/params';
 import { SCREEN_SHARE_NO_CODEC } from '../sfu/client';
 import { playPing } from '../audio/feedback-sounds';
@@ -51,7 +51,7 @@ export type UseSessionManagerReturn = {
   switchMicDevice: () => Promise<void>;
   setRemoteDisplayName: (name: string) => void;
   sendSetState: (selfMuted: boolean, deafened: boolean) => void;
-  sendChat: (text: string, clientMsgId: string) => void;
+  sendChat: (text: string, clientMsgId: string, attachments?: Attachment[]) => void;
   sendPing: (targetId: string) => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
@@ -152,10 +152,8 @@ export function useSessionManager({
 
   const switchEngine = useCallback(
     async (engine: EngineKind): Promise<void> => {
-      const graph = await audio.rebuildLocalAudio(
-        engine,
-        useStore.getState().selfMuted,
-        () => sfu.getPeerConnection(),
+      const graph = await audio.rebuildLocalAudio(engine, useStore.getState().selfMuted, () =>
+        sfu.getPeerConnection(),
       );
       micGraphRef.current = graph;
       attachSpeakingLoop(graph);
@@ -219,8 +217,8 @@ export function useSessionManager({
   }, []);
 
   const sendChat = useCallback(
-    (text: string, clientMsgId: string): void => {
-      sfu.getClient()?.sendChat({ text, clientMsgId });
+    (text: string, clientMsgId: string, attachments?: Attachment[]): void => {
+      sfu.getClient()?.sendChat({ text, clientMsgId, attachments });
     },
     [sfu],
   );

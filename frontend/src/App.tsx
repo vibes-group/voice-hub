@@ -9,6 +9,7 @@ import { useGlobalShortcut } from './hooks/useShortcut';
 import { loadOrCreateDisplayName, makeGuestName, saveDisplayName } from './utils/storage';
 import { playMuteSound, playUnmuteSound } from './audio/feedback-sounds';
 import type { EngineKind } from './types';
+import type { Attachment } from './sfu/protocol';
 
 import { TopBar } from './components/TopBar';
 import { SessionCard } from './components/SessionCard';
@@ -231,11 +232,11 @@ export function App() {
   });
 
   const handleChatSend = useCallback(
-    (text: string, clientMsgId: string) => {
+    (text: string, clientMsgId: string, attachments?: Attachment[]) => {
       if (voiceActive) {
-        session.sendChat(text, clientMsgId);
+        session.sendChat(text, clientMsgId, attachments);
       } else {
-        lurker.sendChat({ text, clientMsgId });
+        lurker.sendChat({ text, clientMsgId, attachments });
       }
     },
     [voiceActive, session, lurker],
@@ -280,6 +281,8 @@ export function App() {
     const selfId = selectSelfPeerId(useStore.getState());
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      // Yield to the chat image lightbox, which uses arrows to page images.
+      if (useStore.getState().chatLightboxOpen) return;
       // Don't hijack arrows while the user is typing (chat composer etc.).
       const a = document.activeElement as HTMLElement | null;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) {

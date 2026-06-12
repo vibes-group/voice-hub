@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -22,6 +23,13 @@ type Config struct {
 	// CIDR prefixes whose RemoteAddr is allowed to set X-Forwarded-For.
 	// Default loopback-only; prod compose pins the docker network range.
 	TrustedProxies []netip.Prefix
+	// Transient chat-attachment store (see internal/filestore). Bytes are held
+	// on disk only long enough to relay them to peers present at send time.
+	UploadMaxBytes   int64
+	UploadTempDir    string
+	UploadTTL        time.Duration
+	UploadTTLHardCap time.Duration
+	UploadTotalBytes int64
 	// Populated by main from disk after Load(); not env-backed.
 	SessionSecret    []byte
 	TurnSharedSecret string
@@ -46,6 +54,12 @@ func Load() (Config, error) {
 		TurnRelayMin:   envUint16("TURN_RELAY_PORT_MIN", 49160),
 		TurnRelayMax:   envUint16("TURN_RELAY_PORT_MAX", 49199),
 		TrustedProxies: trusted,
+
+		UploadMaxBytes:   envInt64("UPLOAD_MAX_BYTES", 100<<20),
+		UploadTempDir:    env("UPLOAD_TEMP_DIR", os.TempDir()),
+		UploadTTL:        time.Duration(envInt64("UPLOAD_TTL_SECONDS", 300)) * time.Second,
+		UploadTTLHardCap: time.Duration(envInt64("UPLOAD_TTL_HARD_CAP_SECONDS", 1800)) * time.Second,
+		UploadTotalBytes: envInt64("UPLOAD_TOTAL_BYTES", 1<<30),
 	}, nil
 }
 
@@ -66,6 +80,21 @@ func envBool(key string, fallback bool) bool {
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		log.Printf("config: bad %s=%q (%v), using default %v", key, value, err, fallback)
+		return fallback
+	}
+
+	return parsed
+}
+
+func envInt64(key string, fallback int64) int64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		log.Printf("config: bad %s=%q (%v), using default %d", key, value, err, fallback)
 		return fallback
 	}
 

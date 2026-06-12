@@ -9,6 +9,7 @@ import (
 
 	"github.com/pion/webrtc/v4"
 
+	"voice-hub/backend/internal/filestore"
 	"voice-hub/backend/internal/sfu/protocol"
 )
 
@@ -542,6 +543,168 @@ func TestLurkerLeave_PeerLeftBroadcast(t *testing.T) {
 	room.mu.Unlock()
 	if n != 1 {
 		t.Errorf("room peer count=%d, want 1", n)
+	}
+}
+
+// newAttachmentRoom builds a room wired to a live transient file store, with
+// two voice peers registered. Returns the room, store, both peers, and cleanup.
+func newAttachmentRoom(t *testing.T, roomID string) (*Room, *filestore.Store, *peer, *peer) {
+	t.Helper()
+	store, err := filestore.New(filestore.Config{
+		TempDir:         t.TempDir(),
+		TTL:             time.Minute,
+		TTLHardCap:      time.Hour,
+		MaxUploadBytes:  1 << 20,
+		MaxTotalBytes:   1 << 20,
+		JanitorInterval: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("filestore.New: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	room := &Room{
+		peers:  make(map[string]*peer),
+		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
+		cfg:    Config{RoomID: roomID, FileStore: store},
+	}
+	p1, cancel1 := newTestPeer("peer-1", "Alice")
+	p2, cancel2 := newTestPeer("peer-2", "Bob")
+	room.peers[p1.id] = p1
+	room.peers[p2.id] = p2
+	t.Cleanup(func() {
+		cancel1()
+		cancel2()
+	})
+	return room, store, p1, p2
+}
+
+// storeImage registers a fake image upload in the store and returns the
+// matching attachment metadata a client would send.
+func storeImage(t *testing.T, store *filestore.Store, roomID string) protocol.Attachment {
+	t.Helper()
+	f, err := store.CreateTemp()
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	_, _ = f.WriteString("imgbytes")
+	_ = f.Close()
+	entry, err := store.Store(roomID, "pic.png", "image/png", 8, f.Name())
+	if err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	return protocol.Attachment{
+		UploadID: entry.UploadID,
+		Kind:     protocol.AttachmentImage,
+		Name:     "pic.png",
+		MIME:     "image/png",
+		Size:     8,
+	}
+}
+
+func TestChatBroadcast_WithAttachments(t *testing.T) {
+	t.Parallel()
+	room, store, p1, p2 := newAttachmentRoom(t, "room1")
+	att := storeImage(t, store, "room1")
+
+	room.broadcastChat(p1, protocol.ChatSendPayload{Text: "look", ClientMsgID: "a1", Attachments: []protocol.Attachment{att}})
+
+	for _, p := range []*peer{p1, p2} {
+		cp, ok := drainChat(t, p, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat, got none", p.id)
+		}
+		if len(cp.Attachments) != 1 {
+			t.Fatalf("peer %s: attachments=%d, want 1", p.id, len(cp.Attachments))
+		}
+		if cp.Attachments[0].UploadID != att.UploadID {
+			t.Errorf("peer %s: uploadId=%q, want %q", p.id, cp.Attachments[0].UploadID, att.UploadID)
+		}
+		if cp.Text != "look" {
+			t.Errorf("peer %s: Text=%q, want look", p.id, cp.Text)
+		}
+	}
+}
+
+func TestChatBroadcast_EmptyTextWithAttachmentPasses(t *testing.T) {
+	t.Parallel()
+	room, store, p1, _ := newAttachmentRoom(t, "room1")
+	att := storeImage(t, store, "room1")
+
+	room.broadcastChat(p1, protocol.ChatSendPayload{Text: "", ClientMsgID: "a1", Attachments: []protocol.Attachment{att}})
+
+	cp, ok := drainChat(t, p1, 200*time.Millisecond)
+	if !ok {
+		t.Fatal("expected chat with attachment and empty text, got none")
+	}
+	if cp.Text != "" || len(cp.Attachments) != 1 {
+		t.Errorf("got Text=%q attachments=%d, want empty text + 1 attachment", cp.Text, len(cp.Attachments))
+	}
+}
+
+func TestChatBroadcast_TooManyAttachmentsDropped(t *testing.T) {
+	t.Parallel()
+	room, _, p1, _ := newAttachmentRoom(t, "room1")
+
+	atts := make([]protocol.Attachment, protocol.ChatMaxAttachments+1)
+	for i := range atts {
+		atts[i] = protocol.Attachment{UploadID: "x", Kind: protocol.AttachmentImage, MIME: "image/png"}
+	}
+	room.broadcastChat(p1, protocol.ChatSendPayload{Text: "too many", ClientMsgID: "a1", Attachments: atts})
+
+	noChatArrives(t, p1, 50*time.Millisecond)
+}
+
+func TestChatBroadcast_UnknownUploadDropped(t *testing.T) {
+	t.Parallel()
+	room, _, p1, _ := newAttachmentRoom(t, "room1")
+
+	att := protocol.Attachment{UploadID: "does-not-exist", Kind: protocol.AttachmentImage, MIME: "image/png"}
+	room.broadcastChat(p1, protocol.ChatSendPayload{Text: "hi", ClientMsgID: "a1", Attachments: []protocol.Attachment{att}})
+
+	noChatArrives(t, p1, 50*time.Millisecond)
+}
+
+func TestChatBroadcast_CrossRoomUploadDropped(t *testing.T) {
+	t.Parallel()
+	room, store, p1, _ := newAttachmentRoom(t, "room1")
+	att := storeImage(t, store, "room2") // belongs to a different room
+
+	room.broadcastChat(p1, protocol.ChatSendPayload{Text: "hi", ClientMsgID: "a1", Attachments: []protocol.Attachment{att}})
+
+	noChatArrives(t, p1, 50*time.Millisecond)
+}
+
+func TestChatBroadcast_NoFileStoreDropsAttachments(t *testing.T) {
+	t.Parallel()
+	// No FileStore configured: attachments are a disabled feature.
+	room, p1, _, cleanup := newTestRoom(t)
+	defer cleanup()
+
+	att := protocol.Attachment{UploadID: "anything", Kind: protocol.AttachmentImage, MIME: "image/png"}
+	room.broadcastChat(p1, protocol.ChatSendPayload{Text: "hi", ClientMsgID: "a1", Attachments: []protocol.Attachment{att}})
+
+	noChatArrives(t, p1, 50*time.Millisecond)
+}
+
+func TestLurkerChatSend_WithAttachments(t *testing.T) {
+	t.Parallel()
+	room, store, voice, _ := newAttachmentRoom(t, "room1")
+	lurker, cancelLurker := newTestLurker("lurk-1", "Lurk")
+	defer cancelLurker()
+	room.peers[lurker.id] = lurker
+
+	att := storeImage(t, store, "room1")
+	room.broadcastChat(lurker, protocol.ChatSendPayload{Text: "shared", ClientMsgID: "l1", Attachments: []protocol.Attachment{att}})
+
+	for _, p := range []*peer{voice, lurker} {
+		cp, ok := drainChat(t, p, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat from lurker, got none", p.id)
+		}
+		if len(cp.Attachments) != 1 || cp.Attachments[0].UploadID != att.UploadID {
+			t.Errorf("peer %s: attachments=%v, want one matching %q", p.id, cp.Attachments, att.UploadID)
+		}
 	}
 }
 

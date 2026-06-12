@@ -159,11 +159,39 @@ export type SetStatePayload = {
  */
 export const CHAT_MAX_BYTES = 2000;
 
+/** Max attachments per chat message; mirrors protocol.ChatMaxAttachments. */
+export const CHAT_MAX_ATTACHMENTS = 10;
+
+/** Renders as an inline image preview ('image') or a download card ('file'). */
+export type AttachmentKind = 'image' | 'file';
+
+/**
+ * Lightweight metadata for one chat attachment. The bytes travel over HTTP
+ * (upload/download endpoints, keyed by uploadId), never over the WS. Mirrors
+ * protocol.Attachment in the Go backend.
+ *
+ * width/height/blurThumb are image-only hints: dimensions reserve layout space
+ * without a reflow, blurThumb is a tiny base64 JPEG data URL placeholder shown
+ * until the full image resolves.
+ */
+export type Attachment = {
+  uploadId: string;
+  kind: AttachmentKind;
+  name: string;
+  mime: string;
+  size: number;
+  width?: number;
+  height?: number;
+  blurThumb?: string;
+};
+
 /**
  * Data field of "chat-send" (C→S).
  *
  * Rejected by server if: peer has not sent "hello" yet; text is empty after
- * trim; UTF-8 byte length exceeds CHAT_MAX_BYTES.
+ * trim AND there are no attachments; text UTF-8 byte length exceeds
+ * CHAT_MAX_BYTES; more than CHAT_MAX_ATTACHMENTS attachments; any attachment
+ * references an upload not live in this room.
  *
  * clientMsgId is a client-generated dedup key (UUIDv4 recommended). Echoed
  * back in the ChatPayload broadcast so the sender can reconcile its optimistic
@@ -172,6 +200,7 @@ export const CHAT_MAX_BYTES = 2000;
 export type ChatSendPayload = {
   text: string;
   clientMsgId: string;
+  attachments?: Attachment[];
 };
 
 /**
@@ -199,6 +228,7 @@ export type ChatPayload = {
   ts: number;
   clientMsgId?: string;
   senderName?: string;
+  attachments?: Attachment[];
 };
 
 // Screen share — mirror of protocol/messages.go Screen* types.
@@ -338,6 +368,18 @@ function isScreenVideoCodec(v: unknown): v is ScreenVideoCodec {
 
 function isScreenShareMode(v: unknown): v is ScreenShareMode {
   return v === 'sharp' || v === 'motion';
+}
+
+function isValidAttachment(v: unknown): v is Attachment {
+  if (typeof v !== 'object' || v === null) return false;
+  const a = v as Record<string, unknown>;
+  return (
+    typeof a.uploadId === 'string' &&
+    (a.kind === 'image' || a.kind === 'file') &&
+    typeof a.name === 'string' &&
+    typeof a.mime === 'string' &&
+    typeof a.size === 'number'
+  );
 }
 
 export function parseServerMessage(raw: string): ServerMessage | null {
@@ -538,6 +580,12 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       ) {
         console.warn("[protocol] malformed 'chat' payload:", data);
         return null;
+      }
+      if (d.attachments !== undefined) {
+        if (!Array.isArray(d.attachments) || !d.attachments.every(isValidAttachment)) {
+          console.warn("[protocol] malformed 'chat' attachments:", data);
+          return null;
+        }
       }
       return { event, data: data as ChatPayload };
     }

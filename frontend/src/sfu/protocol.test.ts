@@ -380,3 +380,70 @@ describe('parseServerMessage', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// chat attachments
+// ---------------------------------------------------------------------------
+
+describe('chat attachments', () => {
+  const base = { id: 'ULID', from: 'peer-1', text: 'look', ts: 1 };
+
+  it('accepts a chat payload with a valid attachment array', () => {
+    const attachment = {
+      uploadId: 'up-1',
+      kind: 'image',
+      name: 'pic.png',
+      mime: 'image/png',
+      size: 1234,
+      width: 800,
+      height: 600,
+      blurThumb: 'data:image/jpeg;base64,AAAA',
+    };
+    const msg = parseServerMessage(envelope('chat', { ...base, attachments: [attachment] }));
+    expect(msg).not.toBeNull();
+    if (msg && msg.event === 'chat') {
+      expect(msg.data.attachments).toHaveLength(1);
+      expect(msg.data.attachments![0].uploadId).toBe('up-1');
+      expect(msg.data.attachments![0].kind).toBe('image');
+    }
+  });
+
+  it('accepts a chat payload with empty text but attachments', () => {
+    const attachment = {
+      uploadId: 'up-2',
+      kind: 'file',
+      name: 'a.bin',
+      mime: 'application/octet-stream',
+      size: 9,
+    };
+    const msg = parseServerMessage(
+      envelope('chat', { ...base, text: '', attachments: [attachment] }),
+    );
+    expect(msg).not.toBeNull();
+  });
+
+  it('rejects a chat payload whose attachments is not an array', () => {
+    const msg = parseServerMessage(envelope('chat', { ...base, attachments: 'nope' }));
+    expect(msg).toBeNull();
+  });
+
+  it('rejects a chat payload with a malformed attachment (bad kind)', () => {
+    const bad = { uploadId: 'up-3', kind: 'gif', name: 'x', mime: 'image/gif', size: 1 };
+    const msg = parseServerMessage(envelope('chat', { ...base, attachments: [bad] }));
+    expect(msg).toBeNull();
+  });
+
+  it('rejects a chat payload with an attachment missing required fields', () => {
+    const bad = { uploadId: 'up-4', kind: 'image' };
+    const msg = parseServerMessage(envelope('chat', { ...base, attachments: [bad] }));
+    expect(msg).toBeNull();
+  });
+
+  it('still parses a chat payload without attachments', () => {
+    const msg = parseServerMessage(envelope('chat', base));
+    expect(msg).not.toBeNull();
+    if (msg && msg.event === 'chat') {
+      expect(msg.data.attachments).toBeUndefined();
+    }
+  });
+});

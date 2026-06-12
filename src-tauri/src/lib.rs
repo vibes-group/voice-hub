@@ -149,6 +149,9 @@ pub fn run() {
                 .resizable(false)
                 .maximizable(false)
                 .visible(!start_hidden)
+                // Let the webview keep HTML5 drag-and-drop events (chat file
+                // drop) instead of the native handler swallowing them.
+                .disable_drag_drop_handler()
                 .build()?;
 
             let handle = app.handle().clone();

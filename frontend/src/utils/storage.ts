@@ -5,6 +5,8 @@
 import type { EngineKind } from '../types';
 import { ENGINE_IDS } from '../audio/engine';
 import { isRoomSlug, DEFAULT_ROOM_SLUG, type RoomSlug } from '../rooms';
+import type { Attachment } from '../sfu/protocol';
+import { deleteBlob } from './blobCache';
 
 export const KEYS = {
   // Audio / engine
@@ -66,12 +68,52 @@ export type PersistedChatMessage = {
   // Stable per-install id of the sender. Lets MessageRow identify own messages
   // after our own peerId rotates (leave + rejoin).
   senderClientId?: string;
+  // Image/file attachments. Bytes live in the IndexedDB blob cache (and the
+  // server's transient buffer until it expires), keyed by attachment.uploadId.
+  attachments?: Attachment[];
+  // uploadIds whose bytes have been dropped locally (manual delete or the 1GB
+  // cache cap). The message stays in history; these attachments render as
+  // "deleted" and are never re-fetched. Persisted.
+  deletedUploadIds?: string[];
+  // --- transient, never persisted (see stripTransient) ---
+  // Aggregate upload progress 0..1 while a pending message's attachments upload.
+  uploadProgress?: number;
+  // True when an attachment upload failed; surfaces a retry affordance.
+  uploadFailed?: boolean;
 };
 
-function pruneChatHistory(messages: PersistedChatMessage[]): PersistedChatMessage[] {
+// Splits history into the messages to keep and the ones aged out (>7d) or
+// FIFO-evicted (>500). The dropped set drives blob cleanup: a message leaving
+// history takes its attachments' bytes with it, so blobCache needs no age limit
+// of its own.
+function pruneChatHistory(messages: PersistedChatMessage[]): {
+  kept: PersistedChatMessage[];
+  dropped: PersistedChatMessage[];
+} {
   const cutoff = Date.now() - CHAT_TTL_MS;
-  const fresh = messages.filter((m) => m.ts >= cutoff);
-  return fresh.length > CHAT_HISTORY_CAP ? fresh.slice(fresh.length - CHAT_HISTORY_CAP) : fresh;
+  const kept: PersistedChatMessage[] = [];
+  const dropped: PersistedChatMessage[] = [];
+  for (const m of messages) (m.ts >= cutoff ? kept : dropped).push(m);
+  if (kept.length > CHAT_HISTORY_CAP) {
+    dropped.push(...kept.splice(0, kept.length - CHAT_HISTORY_CAP));
+  }
+  return { kept, dropped };
+}
+
+// Frees the IndexedDB bytes of dropped messages' attachments (fire-and-forget).
+function deleteDroppedBlobs(dropped: PersistedChatMessage[]): void {
+  for (const m of dropped) {
+    for (const a of m.attachments ?? []) void deleteBlob(a.uploadId);
+  }
+}
+
+// Strips in-flight-only fields (upload progress/failure) so a reload never
+// resurrects a half-uploaded or failed send as if it were real history.
+function stripTransient(m: PersistedChatMessage): PersistedChatMessage {
+  const copy = { ...m };
+  delete copy.uploadProgress;
+  delete copy.uploadFailed;
+  return copy;
 }
 
 export function loadChatHistory(roomId: string): PersistedChatMessage[] {
@@ -80,25 +122,28 @@ export function loadChatHistory(roomId: string): PersistedChatMessage[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    const pruned = pruneChatHistory(parsed as PersistedChatMessage[]);
-    // Persist the pruned view so a session that only reads still expires stale
-    // entries on disk.
-    if (pruned.length !== (parsed as unknown[]).length) {
+    const { kept, dropped } = pruneChatHistory(parsed as PersistedChatMessage[]);
+    if (dropped.length > 0) {
+      deleteDroppedBlobs(dropped);
+      // Persist the pruned view so a session that only reads still expires stale
+      // entries on disk.
       try {
-        localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(pruned));
+        localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(kept));
       } catch {
         /* best effort */
       }
     }
-    return pruned;
+    return kept;
   } catch {
     return [];
   }
 }
 
 export function saveChatHistory(roomId: string, messages: PersistedChatMessage[]): void {
+  const { kept, dropped } = pruneChatHistory(messages);
+  deleteDroppedBlobs(dropped);
   try {
-    localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(pruneChatHistory(messages)));
+    localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(kept.map(stripTransient)));
   } catch {
     /* quota exceeded — best effort */
   }
@@ -286,4 +331,3 @@ export function consumeRejoinFlag(): boolean {
   localStorage.removeItem(KEYS.rejoinOnLoad);
   return true;
 }
-

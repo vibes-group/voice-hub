@@ -37,6 +37,8 @@
     "@vitejs/plugin-react": "6.0.1",
     "eslint": "10.3.0",
     "eslint-plugin-react-hooks": "7.1.1",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
     "prettier": "3.8.3",
     "tailwindcss": "4.3.0",
     "typescript": "6.0.3",
