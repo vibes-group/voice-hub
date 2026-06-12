@@ -1,0 +1,4 @@
+# shortcut.rs's binding_fixtures_roundtrip test byte-compares these fixtures
+# against serde_json's LF output. Force LF so a Windows checkout (autocrlf)
+# doesn't turn them into CRLF and break the test.
+testdata/*.json text eol=lf
