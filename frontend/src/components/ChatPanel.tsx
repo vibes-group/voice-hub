@@ -734,11 +734,22 @@ const MessageRow = memo(function MessageRow({
       {...menuHandlers}
       className={`px-2 ${showName ? 'pt-2' : ''} ${msg.pending ? 'opacity-50' : ''}`}
     >
-      {showName && (
-        <div
-          className={`text-[11px] font-bold uppercase tracking-[0.14em] truncate mb-0.5 ${isSelf ? 'text-accent' : 'text-muted'}`}
-        >
-          {senderName}
+      {(showName || (showTime && !msg.text)) && (
+        <div className="flex items-baseline justify-between gap-3 mb-0.5">
+          {showName ? (
+            <span
+              className={`text-[11px] font-bold uppercase tracking-[0.14em] truncate min-w-0 ${isSelf ? 'text-accent' : 'text-muted'}`}
+            >
+              {senderName}
+            </span>
+          ) : (
+            <span />
+          )}
+          {showTime && !msg.text && (
+            <span className="text-[11px] text-muted-2 tabular-nums shrink-0">
+              {formatTime(msg.ts)}
+            </span>
+          )}
         </div>
       )}
 
@@ -774,15 +785,11 @@ const MessageRow = memo(function MessageRow({
         </div>
       )}
 
-      {(msg.text || showTime) && (
+      {msg.text && (
         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 items-baseline">
-          {msg.text ? (
-            <p className="m-0 text-[17px] text-body break-words whitespace-pre-wrap">
-              {renderedText}
-            </p>
-          ) : (
-            <span />
-          )}
+          <p className="m-0 text-[17px] text-body break-words whitespace-pre-wrap">
+            {renderedText}
+          </p>
           {showTime && (
             <span className="text-[11px] text-muted-2 tabular-nums shrink-0">
               {formatTime(msg.ts)}
