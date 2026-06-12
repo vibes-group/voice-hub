@@ -30,7 +30,7 @@ export type ChatOnlyClient = {
   connect(opts: ChatOnlyConnectOptions): Promise<void>;
   disconnect(): void;
   sendChat(payload: ChatSendPayload): void;
-  sendChatDelete(id: string): void;
+  sendChatDelete(id: string): boolean;
   sendPing(targetId: string): void;
 };
 
@@ -69,9 +69,11 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
   let ws: WebSocket | null = null;
   let stopped = false;
 
-  function send(event: string, data: unknown): void {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Returns whether the frame was actually written — see createSFUClient.send.
+  function send(event: string, data: unknown): boolean {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify({ event, data }));
+    return true;
   }
 
   function connect(opts: ChatOnlyConnectOptions): Promise<void> {
@@ -159,8 +161,8 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     send('chat-send', payload);
   }
 
-  function sendChatDelete(id: string): void {
-    send('chat-delete', { id });
+  function sendChatDelete(id: string): boolean {
+    return send('chat-delete', { id });
   }
 
   function sendPing(targetId: string): void {

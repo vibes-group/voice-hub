@@ -52,7 +52,7 @@ export type UseSessionManagerReturn = {
   setRemoteDisplayName: (name: string) => void;
   sendSetState: (selfMuted: boolean, deafened: boolean) => void;
   sendChat: (text: string, clientMsgId: string, attachments?: Attachment[]) => void;
-  sendChatDelete: (id: string) => void;
+  sendChatDelete: (id: string) => boolean;
   sendPing: (targetId: string) => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
@@ -226,9 +226,7 @@ export function useSessionManager({
   );
 
   const sendChatDelete = useCallback(
-    (id: string): void => {
-      sfu.getClient()?.sendChatDelete(id);
-    },
+    (id: string): boolean => sfu.getClient()?.sendChatDelete(id) ?? false,
     [sfu],
   );
 

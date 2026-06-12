@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStore, type ChatMessage } from './useStore';
+import { getChatRecord } from '../utils/blobCache';
 
 function fileMsg(id: string, uploadIds: string[]): ChatMessage {
   return {
@@ -25,7 +26,7 @@ beforeEach(() => {
 });
 
 describe('markAttachmentsDeleted', () => {
-  it('flags matching attachments across rooms and persists only changed rooms', () => {
+  it('flags matching attachments across rooms and persists only changed rooms', async () => {
     useStore.setState({
       chatByRoom: { room1: [fileMsg('m1', ['a'])], room2: [fileMsg('m2', ['b'])] },
     });
@@ -35,10 +36,13 @@ describe('markAttachmentsDeleted', () => {
     expect(useStore.getState().chatByRoom.room1[0].deletedUploadIds).toEqual(['a']);
     expect(useStore.getState().chatByRoom.room2[0].deletedUploadIds).toBeUndefined();
 
-    const persisted = JSON.parse(localStorage.getItem('voice-hub.chat.room1')!);
-    expect(persisted[0].deletedUploadIds).toEqual(['a']);
+    // Persistence is fire-and-forget to IndexedDB; wait for the changed room.
+    await vi.waitFor(async () => {
+      const room1 = await getChatRecord<ChatMessage[]>('room1');
+      expect(room1?.[0].deletedUploadIds).toEqual(['a']);
+    });
     // The unaffected room is not rewritten.
-    expect(localStorage.getItem('voice-hub.chat.room2')).toBeNull();
+    expect(await getChatRecord('room2')).toBeUndefined();
   });
 
   it('is a no-op when the ids are already marked (state untouched)', () => {

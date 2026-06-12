@@ -349,10 +349,19 @@ export const useStore = create<AppState>((set, get) => ({
     }),
 
   chatByRoom: {},
-  loadChatRoom: (roomId) =>
-    set((s) => ({
-      chatByRoom: { ...s.chatByRoom, [roomId]: loadChatHistory(roomId) },
-    })),
+  loadChatRoom: (roomId) => {
+    void loadChatHistory(roomId).then((loaded) => {
+      set((s) => {
+        const existing = s.chatByRoom[roomId] ?? [];
+        if (existing.length === 0) return { chatByRoom: { ...s.chatByRoom, [roomId]: loaded } };
+        // Messages may arrive during the async load — keep them. History
+        // (older) goes first, live entries after, deduped by id.
+        const seen = new Set(existing.map((m) => m.id));
+        const merged = [...loaded.filter((m) => !seen.has(m.id)), ...existing];
+        return { chatByRoom: { ...s.chatByRoom, [roomId]: merged } };
+      });
+    });
+  },
   chatSendOptimistic: (roomId, msg) =>
     set((s) => ({
       chatByRoom: { ...s.chatByRoom, [roomId]: [...(s.chatByRoom[roomId] ?? []), msg] },
@@ -404,7 +413,7 @@ export const useStore = create<AppState>((set, get) => ({
       return changedRooms.length ? { chatByRoom } : {};
     });
     for (const roomId of changedRooms)
-      saveChatHistory(roomId, useStore.getState().chatByRoom[roomId]);
+      void saveChatHistory(roomId, useStore.getState().chatByRoom[roomId]);
   },
   chatDelete: (roomId, id) => {
     let removed: ChatMessage | undefined;
@@ -417,11 +426,11 @@ export const useStore = create<AppState>((set, get) => ({
     });
     if (!removed) return;
     deleteDroppedBlobs([removed]);
-    saveChatHistory(roomId, useStore.getState().chatByRoom[roomId] ?? []);
+    void saveChatHistory(roomId, useStore.getState().chatByRoom[roomId] ?? []);
   },
   persistChat: (roomId) => {
     const msgs = useStore.getState().chatByRoom[roomId];
-    if (msgs) saveChatHistory(roomId, msgs);
+    if (msgs) void saveChatHistory(roomId, msgs);
   },
   chatLightboxOpen: false,
   setChatLightboxOpen: (open) => set({ chatLightboxOpen: open }),

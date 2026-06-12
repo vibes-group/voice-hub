@@ -80,7 +80,7 @@ export type SFUClient = {
   setDisplayName(name: string): void;
   sendSetState(selfMuted: boolean, deafened: boolean): void;
   sendChat(payload: ChatSendPayload): void;
-  sendChatDelete(id: string): void;
+  sendChatDelete(id: string): boolean;
   sendPing(targetId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   startScreenShare(): Promise<void>;
@@ -142,9 +142,12 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
 
   void primeScreenCodecProfile();
 
-  function send(event: string, data: unknown): void {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Returns whether the frame was actually written — callers that need delivery
+  // feedback (e.g. chat-delete) check this; a closed socket is a no-op.
+  function send(event: string, data: unknown): boolean {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify({ event, data }));
+    return true;
   }
 
   function setupAudioAndWS(opts: ConnectOptions): Promise<void> {
@@ -954,8 +957,8 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     send('chat-send', payload);
   }
 
-  function sendChatDelete(id: string): void {
-    send('chat-delete', { id });
+  function sendChatDelete(id: string): boolean {
+    return send('chat-delete', { id });
   }
 
   function sendPing(targetId: string): void {

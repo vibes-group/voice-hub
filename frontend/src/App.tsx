@@ -244,10 +244,7 @@ export function App() {
   );
 
   const handleChatDelete = useCallback(
-    (id: string) => {
-      if (voiceActive) session.sendChatDelete(id);
-      else lurker.sendChatDelete(id);
-    },
+    (id: string): boolean => (voiceActive ? session.sendChatDelete(id) : lurker.sendChatDelete(id)),
     [voiceActive, session, lurker],
   );
 

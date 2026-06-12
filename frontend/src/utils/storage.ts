@@ -6,7 +6,7 @@ import type { EngineKind } from '../types';
 import { ENGINE_IDS } from '../audio/engine';
 import { isRoomSlug, DEFAULT_ROOM_SLUG, type RoomSlug } from '../rooms';
 import type { Attachment } from '../sfu/protocol';
-import { deleteBlob } from './blobCache';
+import { deleteBlob, getChatRecord, putChatRecord } from './blobCache';
 
 export const KEYS = {
   // Audio / engine
@@ -44,14 +44,16 @@ export const KEYS = {
   screenShareMode: 'voice-hub.screen-share-mode',
 } as const;
 
-// Prefix for per-room chat history: voice-hub.chat.<roomId> = JSON ChatMessage[].
-// Two retention rules applied together (whichever is stricter wins):
+// Per-room chat history, persisted in the IndexedDB blob DB (store 'chat',
+// keyed by roomId) so it shares the larger IDB quota with attachment bytes
+// rather than the ~5 MB localStorage budget. Two retention rules apply together
+// (whichever is stricter wins):
 //   1. Drop messages older than CHAT_TTL_MS (rolling window).
 //   2. Cap to CHAT_HISTORY_CAP entries (FIFO eviction on write).
 // Pruning runs on both load and save so stale entries don't linger across
-// sessions where the user just reads without writing.
-const CHAT_KEY_PREFIX = 'voice-hub.chat.';
-export const CHAT_HISTORY_CAP = 500;
+// sessions where the user just reads without writing. No migration from the
+// former localStorage location — any pre-existing history is simply abandoned.
+export const CHAT_HISTORY_CAP = 1000;
 export const CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type PersistedChatMessage = {
@@ -83,7 +85,7 @@ export type PersistedChatMessage = {
 };
 
 // Splits history into the messages to keep and the ones aged out (>7d) or
-// FIFO-evicted (>500). The dropped set drives blob cleanup: a message leaving
+// FIFO-evicted (>CHAT_HISTORY_CAP). The dropped set drives blob cleanup: a message leaving
 // history takes its attachments' bytes with it, so blobCache needs no age limit
 // of its own.
 function pruneChatHistory(messages: PersistedChatMessage[]): {
@@ -117,37 +119,25 @@ function stripTransient(m: PersistedChatMessage): PersistedChatMessage {
   return copy;
 }
 
-export function loadChatHistory(roomId: string): PersistedChatMessage[] {
-  try {
-    const raw = localStorage.getItem(CHAT_KEY_PREFIX + roomId);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const { kept, dropped } = pruneChatHistory(parsed as PersistedChatMessage[]);
-    if (dropped.length > 0) {
-      deleteDroppedBlobs(dropped);
-      // Persist the pruned view so a session that only reads still expires stale
-      // entries on disk.
-      try {
-        localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(kept));
-      } catch {
-        /* best effort */
-      }
-    }
-    return kept;
-  } catch {
-    return [];
+export async function loadChatHistory(roomId: string): Promise<PersistedChatMessage[]> {
+  const stored = await getChatRecord<PersistedChatMessage[]>(roomId);
+  if (!Array.isArray(stored)) return [];
+  const { kept, dropped } = pruneChatHistory(stored);
+  if (dropped.length > 0) {
+    deleteDroppedBlobs(dropped);
+    // Persist the pruned view so a read-only session still expires stale entries.
+    void putChatRecord(roomId, kept);
   }
+  return kept;
 }
 
-export function saveChatHistory(roomId: string, messages: PersistedChatMessage[]): void {
+export async function saveChatHistory(
+  roomId: string,
+  messages: PersistedChatMessage[],
+): Promise<void> {
   const { kept, dropped } = pruneChatHistory(messages);
   deleteDroppedBlobs(dropped);
-  try {
-    localStorage.setItem(CHAT_KEY_PREFIX + roomId, JSON.stringify(kept.map(stripTransient)));
-  } catch {
-    /* quota exceeded — best effort */
-  }
+  await putChatRecord(roomId, kept.map(stripTransient));
 }
 
 // Prefix for per-peer volume entries: voice-hub.peer-volume.<clientId> = number.
@@ -331,4 +321,23 @@ export function consumeRejoinFlag(): boolean {
   if (localStorage.getItem(KEYS.rejoinOnLoad) !== '1') return false;
   localStorage.removeItem(KEYS.rejoinOnLoad);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Migration: remove keys written by old code versions (run once on startup)
+// ---------------------------------------------------------------------------
+
+export function clearLegacyStorage(): void {
+  try {
+    // Chat history moved to IndexedDB; drop the per-room localStorage entries
+    // (voice-hub.chat.<roomId>) that older versions wrote and nobody reads now.
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('voice-hub.chat.')) stale.push(key);
+    }
+    for (const key of stale) localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
 }

@@ -17,7 +17,7 @@ import {
   type AttachmentKind,
 } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
-import { Send, Info, Paperclip, X, Trash2 } from 'lucide-react';
+import { Send, Info, Paperclip, X, Trash2, WifiOff } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
 import { uploadFile, imageMeta, MAX_UPLOAD_BYTES, TEMP_UPLOAD_PREFIX } from '../utils/uploadFile';
 import { putBlob, getBlob, rekeyBlob, pruneBlobs, deleteBlob } from '../utils/blobCache';
@@ -94,8 +94,13 @@ function renderText(text: string): ReactNode {
 
 const MAX_DISPLAY = 200;
 
+// Stable empty ref for the chat selector. A fresh `[]` fallback would change
+// identity every render — and since history now loads async (the entry stays
+// undefined until IndexedDB resolves), useSyncExternalStore would loop.
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
 const CHAT_HINT =
-  'Сообщения видны всем в комнате.\nСервер их не хранит — только пересылает.\nИстория хранится локально на устройстве: 7 дней или 500 сообщений.';
+  'Сообщения и файлы видны всем в комнате.\nСервер их не хранит — только пересылает.\nИстория хранится локально на устройстве: 7 дней или 1к сообщений (файлы — до 1 ГБ).';
 
 function byteLength(s: string): number {
   return TEXT_ENCODER.encode(s).length;
@@ -109,7 +114,10 @@ function formatTime(ts: number): string {
 interface Props {
   roomId: string;
   onSend: (text: string, clientMsgId: string, attachments?: Attachment[]) => void;
-  onDelete: (id: string) => void;
+  // Returns false when the request couldn't be sent (socket closed) — the
+  // message stays and we surface that, since deletion only takes effect on the
+  // server's echo.
+  onDelete: (id: string) => boolean;
 }
 
 type VisibleMessage = {
@@ -122,7 +130,7 @@ type VisibleMessage = {
 };
 
 export function ChatPanel({ roomId, onSend, onDelete }: Props) {
-  const messages = useStore((s) => s.chatByRoom[roomId] ?? []);
+  const messages = useStore((s) => s.chatByRoom[roomId] ?? EMPTY_MESSAGES);
   const participants = useStore((s) => s.participants);
   const chatSendOptimistic = useStore((s) => s.chatSendOptimistic);
   const chatUpdateUploadProgress = useStore((s) => s.chatUpdateUploadProgress);
@@ -466,10 +474,26 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
     setMenu({ x, y, id });
   }, []);
   const closeMessageMenu = useCallback(() => setMenu(null), []);
+
+  // Transient bottom-right notice, auto-dismissed (mirrors PingToast).
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
+  const showNotice = useCallback((text: string) => {
+    setNotice(text);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setNotice(null), 3500);
+  }, []);
+
   const confirmDeleteMessage = useCallback(() => {
-    if (menu) onDelete(menu.id);
+    if (menu && !onDelete(menu.id)) showNotice('Нет соединения — сообщение не удалено');
     setMenu(null);
-  }, [menu, onDelete]);
+  }, [menu, onDelete, showNotice]);
 
   return (
     <section
@@ -604,6 +628,17 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
           onDelete={confirmDeleteMessage}
           onClose={closeMessageMenu}
         />
+      )}
+
+      {notice && (
+        <div
+          className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 bg-bg-1 border border-danger text-danger text-[13px] shadow-lg pointer-events-none animate-[fadeIn_0.15s_ease-out]"
+          role="status"
+          aria-live="polite"
+        >
+          <WifiOff size={16} aria-hidden />
+          <span>{notice}</span>
+        </div>
       )}
     </section>
   );

@@ -6,7 +6,10 @@
 
 const DB_NAME = 'voice-hub-blobs';
 const STORE = 'blobs';
-const DB_VERSION = 1;
+// Per-room chat history shares this DB (one connection, related data). Value is
+// the room's message array, keyed out-of-line by roomId.
+const CHAT_STORE = 'chat';
+const DB_VERSION = 2;
 
 // Total-bytes ceiling for cached blobs; oldest-first (LRU) eviction past this.
 // Age-based cleanup is driven by chat-history retention (a dropped message
@@ -35,6 +38,9 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'uploadId' });
       }
+      if (!db.objectStoreNames.contains(CHAT_STORE)) {
+        db.createObjectStore(CHAT_STORE);
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -45,12 +51,13 @@ function openDB(): Promise<IDBDatabase> {
 function request<T>(
   mode: IDBTransactionMode,
   run: (store: IDBObjectStore) => IDBRequest<T>,
+  storeName: string = STORE,
 ): Promise<T> {
   return openDB().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const tx = db.transaction(STORE, mode);
-        const req = run(tx.objectStore(STORE));
+        const tx = db.transaction(storeName, mode);
+        const req = run(tx.objectStore(storeName));
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       }),
@@ -145,5 +152,27 @@ export async function pruneBlobs(maxTotalBytes: number = MAX_TOTAL_BYTES): Promi
     return evicted;
   } catch {
     return [];
+  }
+}
+
+// --- Chat history records (store keyed by roomId) ---
+
+/** Reads a room's stored value, or undefined when absent / IndexedDB is off. */
+export async function getChatRecord<T>(roomId: string): Promise<T | undefined> {
+  if (!supported()) return undefined;
+  try {
+    return await request<T | undefined>('readonly', (s) => s.get(roomId), CHAT_STORE);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Overwrites a room's stored value. Fails soft. */
+export async function putChatRecord(roomId: string, value: unknown): Promise<void> {
+  if (!supported()) return;
+  try {
+    await request('readwrite', (s) => s.put(value, roomId), CHAT_STORE);
+  } catch {
+    /* best effort */
   }
 }

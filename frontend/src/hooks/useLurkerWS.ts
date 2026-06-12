@@ -28,8 +28,8 @@ export type UseLurkerWSDeps = {
 export type UseLurkerWSReturn = {
   /** Send a chat message via the lurker WS. No-op when not connected. */
   sendChat: (payload: import('../sfu/protocol').ChatSendPayload) => void;
-  /** Retract a message by id via the lurker WS. No-op when not connected. */
-  sendChatDelete: (id: string) => void;
+  /** Retract a message by id via the lurker WS. Returns false when not connected. */
+  sendChatDelete: (id: string) => boolean;
   /** Send a ping via the lurker WS. No-op when not connected. */
   sendPing: (targetId: string) => void;
 };
@@ -209,9 +209,10 @@ export function useLurkerWS({
     clientRef.current?.sendChat(payload);
   }, []);
 
-  const sendChatDelete = useCallback((id: string): void => {
-    clientRef.current?.sendChatDelete(id);
-  }, []);
+  const sendChatDelete = useCallback(
+    (id: string): boolean => clientRef.current?.sendChatDelete(id) ?? false,
+    [],
+  );
 
   const sendPing = useCallback((targetId: string): void => {
     clientRef.current?.sendPing(targetId);
