@@ -5,7 +5,7 @@ import type { useAudioEngine } from './useAudioEngine';
 import type { useSFU } from './useSFU';
 import { loadPeerVolume } from '../utils/storage';
 import { retryPendingChats } from '../utils/chat-retry';
-import type { ChatPayload, PingPayload } from '../sfu/protocol';
+import type { ChatPayload, ChatDeletedPayload, PingPayload } from '../sfu/protocol';
 import type { SFUHandlers } from '../sfu/client';
 import { screenShareErrorRu } from '../screenshare/errors';
 import { createReconnectScheduler } from '../utils/reconnect';
@@ -16,6 +16,7 @@ export type SFUHandlerDeps = {
   sfu: ReturnType<typeof useSFU>;
   getStore: typeof useStore.getState;
   handleChatReceive: (data: ChatPayload) => void;
+  handleChatDelete: (data: ChatDeletedPayload) => void;
   handlePingReceive: (data: PingPayload) => void;
   peerIdRef: MutableRefObject<string | null>;
   clientIdRef: MutableRefObject<string>;
@@ -30,6 +31,7 @@ export function buildSFUHandlers(deps: SFUHandlerDeps): Partial<SFUHandlers> {
     sfu,
     getStore,
     handleChatReceive,
+    handleChatDelete,
     handlePingReceive,
     peerIdRef,
     clientIdRef,
@@ -153,6 +155,7 @@ export function buildSFUHandlers(deps: SFUHandlerDeps): Partial<SFUHandlers> {
       getStore().updateParticipant(id, { remoteMuted: selfMuted, remoteDeafened: deafened });
     },
     onChat: handleChatReceive,
+    onChatDeleted: handleChatDelete,
     onPing: handlePingReceive,
     onTrack: ({ track, stream, peerId }) => {
       if (!peerId) return;

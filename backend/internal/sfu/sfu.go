@@ -522,16 +522,22 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 		return
 	}
 
-	// Lurkers may only send chat-send. Silently drop all other message types.
+	// Lurkers may only send/retract chat. Silently drop all other message types.
 	if p.chatOnly {
-		if msg.Event != "chat-send" {
-			return
+		switch msg.Event {
+		case "chat-send":
+			var cs protocol.ChatSendPayload
+			if err := json.Unmarshal(msg.Data, &cs); err != nil {
+				return
+			}
+			r.broadcastChat(p, cs)
+		case "chat-delete":
+			var cd protocol.ChatDeletePayload
+			if err := json.Unmarshal(msg.Data, &cd); err != nil {
+				return
+			}
+			r.broadcastChatDelete(p, cd.ID)
 		}
-		var cs protocol.ChatSendPayload
-		if err := json.Unmarshal(msg.Data, &cs); err != nil {
-			return
-		}
-		r.broadcastChat(p, cs)
 		return
 	}
 
@@ -566,6 +572,12 @@ func (r *Room) handleClientMessage(p *peer, msg protocol.Envelope) {
 			return
 		}
 		r.broadcastChat(p, cs)
+	case "chat-delete":
+		var cd protocol.ChatDeletePayload
+		if err := json.Unmarshal(msg.Data, &cd); err != nil {
+			return
+		}
+		r.broadcastChatDelete(p, cd.ID)
 	case "renegotiate":
 		r.mu.Lock()
 		if time.Since(p.lastRenegotiateAt) < renegotiateCooldown {
@@ -878,6 +890,33 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 		Attachments: cs.Attachments,
 	})
 	env, _ := json.Marshal(protocol.Envelope{Event: "chat", Data: payload})
+
+	r.mu.Lock()
+	all := make([]*peer, 0, len(r.peers))
+	for _, p := range r.peers {
+		all = append(all, p)
+	}
+	r.mu.Unlock()
+
+	for _, p := range all {
+		_ = p.writeRaw(env)
+	}
+}
+
+// broadcastChatDelete echoes a retraction to all peers including the requester,
+// whose own removal rides this echo. Authorship is not verified — chat is never
+// persisted, so the server can't know who sent a given ID; the affordance is
+// gated to own messages client-side, like display names and mute state already are.
+func (r *Room) broadcastChatDelete(sender *peer, id string) {
+	if id == "" {
+		slog.Debug("sfu: chat-delete empty id, dropping", "peer", sender.id)
+		return
+	}
+
+	slog.Debug("sfu: chat-delete", "id", id, "from", sender.id)
+
+	payload, _ := json.Marshal(protocol.ChatDeletedPayload{ID: id})
+	env, _ := json.Marshal(protocol.Envelope{Event: "chat-deleted", Data: payload})
 
 	r.mu.Lock()
 	all := make([]*peer, 0, len(r.peers))

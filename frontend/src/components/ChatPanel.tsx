@@ -17,7 +17,7 @@ import {
   type AttachmentKind,
 } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
-import { Send, Info, Paperclip, X } from 'lucide-react';
+import { Send, Info, Paperclip, X, Trash2 } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
 import { uploadFile, imageMeta, MAX_UPLOAD_BYTES, TEMP_UPLOAD_PREFIX } from '../utils/uploadFile';
 import { putBlob, getBlob, rekeyBlob, pruneBlobs, deleteBlob } from '../utils/blobCache';
@@ -109,6 +109,7 @@ function formatTime(ts: number): string {
 interface Props {
   roomId: string;
   onSend: (text: string, clientMsgId: string, attachments?: Attachment[]) => void;
+  onDelete: (id: string) => void;
 }
 
 type VisibleMessage = {
@@ -120,7 +121,7 @@ type VisibleMessage = {
   renderedText: ReactNode;
 };
 
-export function ChatPanel({ roomId, onSend }: Props) {
+export function ChatPanel({ roomId, onSend, onDelete }: Props) {
   const messages = useStore((s) => s.chatByRoom[roomId] ?? []);
   const participants = useStore((s) => s.participants);
   const chatSendOptimistic = useStore((s) => s.chatSendOptimistic);
@@ -458,6 +459,18 @@ export function ChatPanel({ roomId, onSend }: Props) {
     return () => setChatLightboxOpen(false);
   }, [lightboxIndex, setChatLightboxOpen]);
 
+  // Not optimistic — deletion rides the server's chat-deleted echo, one path
+  // for us and every online peer.
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const openMessageMenu = useCallback((x: number, y: number, id: string) => {
+    setMenu({ x, y, id });
+  }, []);
+  const closeMessageMenu = useCallback(() => setMenu(null), []);
+  const confirmDeleteMessage = useCallback(() => {
+    if (menu) onDelete(menu.id);
+    setMenu(null);
+  }, [menu, onDelete]);
+
   return (
     <section
       className="card relative p-0! flex flex-col flex-1 min-h-0"
@@ -502,6 +515,7 @@ export function ChatPanel({ roomId, onSend }: Props) {
             onImageClick={openLightbox}
             onRetry={retryMessage}
             onDeleteAttachment={deleteAttachment}
+            onRequestMenu={openMessageMenu}
           />
         ))}
       </div>
@@ -582,6 +596,15 @@ export function ChatPanel({ roomId, onSend }: Props) {
         onNavigate={setLightboxIndex}
         onDelete={(att) => deleteAttachment(att.uploadId)}
       />
+
+      {menu && (
+        <MessageContextMenu
+          x={menu.x}
+          y={menu.y}
+          onDelete={confirmDeleteMessage}
+          onClose={closeMessageMenu}
+        />
+      )}
     </section>
   );
 }
@@ -623,12 +646,14 @@ const MessageRow = memo(function MessageRow({
   onImageClick,
   onRetry,
   onDeleteAttachment,
+  onRequestMenu,
 }: {
   row: VisibleMessage;
   roomId: string;
   onImageClick: (att: Attachment) => void;
   onRetry: (msg: ChatMessage) => void;
   onDeleteAttachment: (uploadId: string) => void;
+  onRequestMenu: (x: number, y: number, id: string) => void;
 }) {
   const { msg, isSelf, senderName, showName, showTime, renderedText } = row;
   const attachments = msg.attachments ?? [];
@@ -638,8 +663,42 @@ const MessageRow = memo(function MessageRow({
   const uploading =
     msg.pending && !msg.uploadFailed && msg.uploadProgress !== undefined && msg.uploadProgress < 1;
 
+  // Only confirmed own messages (server id assigned) can be retracted.
+  const canDelete = isSelf && !msg.pending;
+  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelLongPress = () => {
+    if (longPressRef.current) {
+      clearTimeout(longPressRef.current);
+      longPressRef.current = null;
+    }
+  };
+  useEffect(() => cancelLongPress, []);
+
+  const menuHandlers = canDelete
+    ? {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          onRequestMenu(e.clientX, e.clientY, msg.id);
+        },
+        onTouchStart: (e: React.TouchEvent) => {
+          const { clientX, clientY } = e.touches[0];
+          cancelLongPress();
+          longPressRef.current = setTimeout(() => {
+            longPressRef.current = null;
+            onRequestMenu(clientX, clientY, msg.id);
+          }, 500);
+        },
+        onTouchEnd: cancelLongPress,
+        onTouchMove: cancelLongPress,
+        onTouchCancel: cancelLongPress,
+      }
+    : undefined;
+
   return (
-    <div className={`px-2 ${showName ? 'pt-2' : ''} ${msg.pending ? 'opacity-50' : ''}`}>
+    <div
+      {...menuHandlers}
+      className={`px-2 ${showName ? 'pt-2' : ''} ${msg.pending ? 'opacity-50' : ''}`}
+    >
       {showName && (
         <div
           className={`text-[11px] font-bold uppercase tracking-[0.14em] truncate mb-0.5 ${isSelf ? 'text-accent' : 'text-muted'}`}
@@ -716,3 +775,60 @@ const MessageRow = memo(function MessageRow({
     </div>
   );
 });
+
+function MessageContextMenu({
+  x,
+  y,
+  onDelete,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onClose);
+    // Capture-phase so the chat list's own scroll dismisses the menu too.
+    window.addEventListener('scroll', onClose, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [onClose]);
+
+  const left = Math.min(x, window.innerWidth - 200);
+  const top = Math.min(y, window.innerHeight - 64);
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onPointerDown={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      />
+      <div
+        role="menu"
+        className="fixed z-50 min-w-[180px] border border-line-strong bg-bg-3 py-1 shadow-lg"
+        style={{ left, top }}
+      >
+        <button
+          role="menuitem"
+          onClick={onDelete}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[14px] text-danger hover:bg-bg-2"
+        >
+          <Trash2 size={15} />
+          Удалить
+        </button>
+      </div>
+    </>
+  );
+}

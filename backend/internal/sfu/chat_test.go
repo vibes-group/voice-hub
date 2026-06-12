@@ -728,3 +728,108 @@ func TestChatBroadcast_SenderName(t *testing.T) {
 		}
 	}
 }
+
+// drainDeleted reads p.out until a "chat-deleted" envelope arrives or the
+// timeout elapses.
+func drainDeleted(t *testing.T, p *peer, timeout time.Duration) (protocol.ChatDeletedPayload, bool) {
+	t.Helper()
+	data, ok := drainEvent(t, p, "chat-deleted", timeout)
+	if !ok {
+		return protocol.ChatDeletedPayload{}, false
+	}
+	var dp protocol.ChatDeletedPayload
+	if err := json.Unmarshal(data, &dp); err != nil {
+		t.Fatalf("unmarshal ChatDeletedPayload: %v", err)
+	}
+	return dp, true
+}
+
+func TestChatDeleteBroadcast(t *testing.T) {
+	t.Parallel()
+
+	room, p1, p2, cleanup := newTestRoom(t)
+	defer cleanup()
+
+	const id = "01HXXXXXXXXXXXXXXXXXXXXXXX"
+	room.broadcastChatDelete(p1, id)
+
+	// Requester and every other peer must receive the retraction.
+	for _, recipient := range []*peer{p1, p2} {
+		dp, ok := drainDeleted(t, recipient, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat-deleted, got none", recipient.id)
+		}
+		if dp.ID != id {
+			t.Errorf("peer %s: ID=%q want %q", recipient.id, dp.ID, id)
+		}
+	}
+}
+
+func TestChatDeleteBroadcast_EmptyIDDropped(t *testing.T) {
+	t.Parallel()
+
+	room, p1, p2, cleanup := newTestRoom(t)
+	defer cleanup()
+
+	room.broadcastChatDelete(p1, "")
+
+	for _, p := range []*peer{p1, p2} {
+		if _, ok := drainEvent(t, p, "chat-deleted", 50*time.Millisecond); ok {
+			t.Errorf("peer %s: unexpected chat-deleted for empty id", p.id)
+		}
+	}
+}
+
+// TestChatDeleteViaDispatch verifies the voice-peer message router forwards a
+// chat-delete envelope to broadcastChatDelete.
+func TestChatDeleteViaDispatch(t *testing.T) {
+	t.Parallel()
+
+	room, p1, p2, cleanup := newTestRoom(t)
+	defer cleanup()
+
+	const id = "01HYYYYYYYYYYYYYYYYYYYYYYY"
+	data, _ := json.Marshal(protocol.ChatDeletePayload{ID: id})
+	room.handleClientMessage(p1, protocol.Envelope{Event: "chat-delete", Data: data})
+
+	for _, p := range []*peer{p1, p2} {
+		dp, ok := drainDeleted(t, p, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat-deleted via dispatch, got none", p.id)
+		}
+		if dp.ID != id {
+			t.Errorf("peer %s: ID=%q want %q", p.id, dp.ID, id)
+		}
+	}
+}
+
+// TestLurkerChatDelete verifies a lurker may retract messages: the chat-delete
+// reaches all peers via the lurker dispatch path.
+func TestLurkerChatDelete(t *testing.T) {
+	t.Parallel()
+
+	room := &Room{
+		peers:  make(map[string]*peer),
+		tracks: make(map[string]*webrtc.TrackLocalStaticRTP),
+	}
+	voice, cancelVoice := newTestPeer("voice-1", "Alice")
+	defer cancelVoice()
+	lurker, cancelLurker := newTestLurker("lurk-1", "Lurk")
+	defer cancelLurker()
+	room.peers[voice.id] = voice
+	room.peers[lurker.id] = lurker
+
+	const id = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
+	data, _ := json.Marshal(protocol.ChatDeletePayload{ID: id})
+	room.handleClientMessage(lurker, protocol.Envelope{Event: "chat-delete", Data: data})
+
+	for _, p := range []*peer{voice, lurker} {
+		dp, ok := drainDeleted(t, p, 200*time.Millisecond)
+		if !ok {
+			t.Fatalf("peer %s: expected chat-deleted from lurker, got none", p.id)
+		}
+		if dp.ID != id {
+			t.Errorf("peer %s: ID=%q want %q", p.id, dp.ID, id)
+		}
+	}
+}

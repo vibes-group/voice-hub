@@ -21,7 +21,7 @@ import {
   consumeRejoinFlag,
   loadOrCreateClientId,
 } from '../utils/storage';
-import type { Attachment, ChatPayload, PingPayload } from '../sfu/protocol';
+import type { Attachment, ChatPayload, ChatDeletedPayload, PingPayload } from '../sfu/protocol';
 import type { ShareMode } from '../screenshare/params';
 import { SCREEN_SHARE_NO_CODEC } from '../sfu/client';
 import { playPing } from '../audio/feedback-sounds';
@@ -52,6 +52,7 @@ export type UseSessionManagerReturn = {
   setRemoteDisplayName: (name: string) => void;
   sendSetState: (selfMuted: boolean, deafened: boolean) => void;
   sendChat: (text: string, clientMsgId: string, attachments?: Attachment[]) => void;
+  sendChatDelete: (id: string) => void;
   sendPing: (targetId: string) => void;
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
@@ -61,6 +62,7 @@ export type UseSessionManagerReturn = {
   unsubscribeScreenShare: (publisherId: string) => void;
   getRoomId: () => string;
   handleChatReceive: (data: ChatPayload) => void;
+  handleChatDelete: (data: ChatDeletedPayload) => void;
   handlePingReceive: (data: PingPayload) => void;
 };
 
@@ -223,12 +225,23 @@ export function useSessionManager({
     [sfu],
   );
 
+  const sendChatDelete = useCallback(
+    (id: string): void => {
+      sfu.getClient()?.sendChatDelete(id);
+    },
+    [sfu],
+  );
+
   const sendPing = useCallback(
     (targetId: string): void => {
       sfu.getClient()?.sendPing(targetId);
     },
     [sfu],
   );
+
+  const handleChatDelete = useCallback((data: ChatDeletedPayload): void => {
+    useStore.getState().chatDelete(roomSlugRef.current, data.id);
+  }, []);
 
   const handleChatReceive = useCallback(
     (data: ChatPayload): void => {
@@ -334,6 +347,7 @@ export function useSessionManager({
           sfu,
           getStore,
           handleChatReceive,
+          handleChatDelete,
           handlePingReceive,
           peerIdRef,
           clientIdRef,
@@ -357,7 +371,7 @@ export function useSessionManager({
         client.sendSetState(s.selfMuted, s.deafened);
       }
     },
-    [audio, sfu, handleChatReceive, handlePingReceive, getStore],
+    [audio, sfu, handleChatReceive, handleChatDelete, handlePingReceive, getStore],
   );
 
   useEffect(() => {
@@ -652,6 +666,7 @@ export function useSessionManager({
     setRemoteDisplayName,
     sendSetState,
     sendChat,
+    sendChatDelete,
     sendPing,
     startScreenShare,
     stopScreenShare,
@@ -661,6 +676,7 @@ export function useSessionManager({
     unsubscribeScreenShare,
     getRoomId,
     handleChatReceive,
+    handleChatDelete,
     handlePingReceive,
   };
 }

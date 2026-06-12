@@ -306,6 +306,29 @@ describe('parseServerMessage', () => {
     expect(msg!.event).toBe('candidate');
   });
 
+  it('accepts a well-formed chat-deleted', () => {
+    const raw = JSON.stringify({
+      event: 'chat-deleted',
+      data: { id: '01HXXXXXXXXXXXXXXXXXXXXXXX' },
+    });
+    const msg = parseServerMessage(raw);
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe('chat-deleted');
+    expect((msg as { event: 'chat-deleted'; data: { id: string } }).data.id).toBe(
+      '01HXXXXXXXXXXXXXXXXXXXXXXX',
+    );
+  });
+
+  it("returns null and warns when chat-deleted is missing 'id'", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(parseServerMessage(JSON.stringify({ event: 'chat-deleted', data: {} }))).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("malformed 'chat-deleted'"),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
   it("returns null and warns when offer is missing 'pc'", () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const raw = JSON.stringify({

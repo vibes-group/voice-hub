@@ -376,6 +376,21 @@ type ChatPayload struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
+// ChatDeletePayload is the data field of "chat-delete" (C→S): retract a message
+// by its ULID. The server does not track authorship (chat is never persisted),
+// so it relays the retraction without verifying the sender; clients gate the
+// affordance to their own messages. Empty ID is dropped.
+type ChatDeletePayload struct {
+	ID string `json:"id"`
+}
+
+// ChatDeletedPayload is the data field of "chat-deleted" (S→C), broadcast to all
+// peers including the requester (whose removal rides this echo). A peer that
+// never had the ID treats it as a no-op.
+type ChatDeletedPayload struct {
+	ID string `json:"id"`
+}
+
 // --- Screen share ---
 //
 // Lifecycle events (see tmp/screen-share-plan.md for the full state machine):

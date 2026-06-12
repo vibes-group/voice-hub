@@ -5,6 +5,7 @@ import type {
   PeerLeftPayload,
   ChatPayload,
   ChatSendPayload,
+  ChatDeletedPayload,
   PingPayload,
 } from './protocol';
 
@@ -13,6 +14,7 @@ export type ChatOnlyHandlers = {
   onPeerJoined: (data: PeerInfo) => void;
   onPeerLeft: (data: PeerLeftPayload) => void;
   onChat: (data: ChatPayload) => void;
+  onChatDeleted: (data: ChatDeletedPayload) => void;
   onPing: (data: PingPayload) => void;
   onClose: () => void;
   onError: (err: unknown) => void;
@@ -28,6 +30,7 @@ export type ChatOnlyClient = {
   connect(opts: ChatOnlyConnectOptions): Promise<void>;
   disconnect(): void;
   sendChat(payload: ChatSendPayload): void;
+  sendChatDelete(id: string): void;
   sendPing(targetId: string): void;
 };
 
@@ -57,6 +60,7 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     onPeerJoined: handlers.onPeerJoined ?? noop,
     onPeerLeft: handlers.onPeerLeft ?? noop,
     onChat: handlers.onChat ?? noop,
+    onChatDeleted: handlers.onChatDeleted ?? noop,
     onPing: handlers.onPing ?? noop,
     onClose: handlers.onClose ?? noop,
     onError: handlers.onError ?? noop,
@@ -125,6 +129,9 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
           case 'chat':
             on.onChat(msg.data);
             break;
+          case 'chat-deleted':
+            on.onChatDeleted(msg.data);
+            break;
           case 'ping':
             on.onPing(msg.data);
             break;
@@ -152,9 +159,13 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
     send('chat-send', payload);
   }
 
+  function sendChatDelete(id: string): void {
+    send('chat-delete', { id });
+  }
+
   function sendPing(targetId: string): void {
     send('ping', { to: targetId });
   }
 
-  return { connect, disconnect, sendChat, sendPing };
+  return { connect, disconnect, sendChat, sendChatDelete, sendPing };
 }

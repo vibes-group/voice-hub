@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import { createChatClient, type ChatOnlyClient } from '../sfu/client';
 import { buildWsUrl } from '../config';
 import { loadOrCreateClientId, loadPeerVolume } from '../utils/storage';
-import type { ChatPayload, PingPayload } from '../sfu/protocol';
+import type { ChatPayload, ChatDeletedPayload, PingPayload } from '../sfu/protocol';
 import { useStore } from '../store/useStore';
 import { retryPendingChats } from '../utils/chat-retry';
 
@@ -14,6 +14,8 @@ export type UseLurkerWSDeps = {
   displayName: string;
   /** Fired on every received chat message — same handler as voice WS. */
   onChat: (data: ChatPayload) => void;
+  /** Fired on every received chat retraction — same handler as voice WS. */
+  onChatDeleted: (data: ChatDeletedPayload) => void;
   /** Fired on every received ping — same handler as voice WS. */
   onPing: (data: PingPayload) => void;
   /**
@@ -26,6 +28,8 @@ export type UseLurkerWSDeps = {
 export type UseLurkerWSReturn = {
   /** Send a chat message via the lurker WS. No-op when not connected. */
   sendChat: (payload: import('../sfu/protocol').ChatSendPayload) => void;
+  /** Retract a message by id via the lurker WS. No-op when not connected. */
+  sendChatDelete: (id: string) => void;
   /** Send a ping via the lurker WS. No-op when not connected. */
   sendPing: (targetId: string) => void;
 };
@@ -40,6 +44,7 @@ export type UseLurkerWSReturn = {
 export function useLurkerWS({
   displayName,
   onChat,
+  onChatDeleted,
   onPing,
   voiceActive,
 }: UseLurkerWSDeps): UseLurkerWSReturn {
@@ -58,6 +63,11 @@ export function useLurkerWS({
   useEffect(() => {
     onChatRef.current = onChat;
   }, [onChat]);
+
+  const onChatDeletedRef = useRef(onChatDeleted);
+  useEffect(() => {
+    onChatDeletedRef.current = onChatDeleted;
+  }, [onChatDeleted]);
 
   const onPingRef = useRef(onPing);
   useEffect(() => {
@@ -134,6 +144,9 @@ export function useLurkerWS({
       onChat: (data) => {
         onChatRef.current(data);
       },
+      onChatDeleted: (data) => {
+        onChatDeletedRef.current(data);
+      },
       onPing: (data) => {
         onPingRef.current(data);
       },
@@ -196,9 +209,13 @@ export function useLurkerWS({
     clientRef.current?.sendChat(payload);
   }, []);
 
+  const sendChatDelete = useCallback((id: string): void => {
+    clientRef.current?.sendChatDelete(id);
+  }, []);
+
   const sendPing = useCallback((targetId: string): void => {
     clientRef.current?.sendPing(targetId);
   }, []);
 
-  return { sendChat, sendPing };
+  return { sendChat, sendChatDelete, sendPing };
 }

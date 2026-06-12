@@ -20,6 +20,7 @@ import {
   saveRoomSlug,
   loadChatHistory,
   saveChatHistory,
+  deleteDroppedBlobs,
   loadPeerLabel,
   type PersistedChatMessage,
 } from '../utils/storage';
@@ -175,6 +176,8 @@ export interface AppState {
   // Mark attachments (by uploadId, across all rooms) as deleted — their bytes
   // are gone locally, so they render as "deleted" and never re-fetch.
   markAttachmentsDeleted: (uploadIds: string[]) => void;
+  // Retract a message by server id — our own delete, or a peer's "chat-deleted" echo.
+  chatDelete: (roomId: string, id: string) => void;
   // Persist current history to localStorage (debounce externally).
   persistChat: (roomId: string) => void;
   // True while the chat image lightbox is open, so global arrow-key handlers
@@ -402,6 +405,19 @@ export const useStore = create<AppState>((set, get) => ({
     });
     for (const roomId of changedRooms)
       saveChatHistory(roomId, useStore.getState().chatByRoom[roomId]);
+  },
+  chatDelete: (roomId, id) => {
+    let removed: ChatMessage | undefined;
+    set((s) => {
+      const existing = s.chatByRoom[roomId];
+      if (!existing) return {};
+      removed = existing.find((m) => m.id === id);
+      if (!removed) return {};
+      return { chatByRoom: { ...s.chatByRoom, [roomId]: existing.filter((m) => m.id !== id) } };
+    });
+    if (!removed) return;
+    deleteDroppedBlobs([removed]);
+    saveChatHistory(roomId, useStore.getState().chatByRoom[roomId] ?? []);
   },
   persistChat: (roomId) => {
     const msgs = useStore.getState().chatByRoom[roomId];

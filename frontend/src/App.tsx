@@ -227,6 +227,7 @@ export function App() {
   const lurker = useLurkerWS({
     displayName,
     onChat: session.handleChatReceive,
+    onChatDeleted: session.handleChatDelete,
     onPing: session.handlePingReceive,
     voiceActive,
   });
@@ -238,6 +239,14 @@ export function App() {
       } else {
         lurker.sendChat({ text, clientMsgId, attachments });
       }
+    },
+    [voiceActive, session, lurker],
+  );
+
+  const handleChatDelete = useCallback(
+    (id: string) => {
+      if (voiceActive) session.sendChatDelete(id);
+      else lurker.sendChatDelete(id);
     },
     [voiceActive, session, lurker],
   );
@@ -346,7 +355,7 @@ export function App() {
               />
             )}
             <ScreenShareGallery onTileClick={handleTileClick} />
-            <ChatPanel roomId={roomSlug} onSend={handleChatSend} />
+            <ChatPanel roomId={roomSlug} onSend={handleChatSend} onDelete={handleChatDelete} />
           </div>
           <div className="grid gap-4 content-start">
             <AudioCard

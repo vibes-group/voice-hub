@@ -231,6 +231,22 @@ export type ChatPayload = {
   attachments?: Attachment[];
 };
 
+/**
+ * Data field of "chat-delete" (C→S). Retracts a message by its ULID. The server
+ * does not track authorship, so clients gate the affordance to own messages.
+ */
+export type ChatDeletePayload = {
+  id: string;
+};
+
+/**
+ * Data field of "chat-deleted" (S→C). Broadcast to all peers including the
+ * requester; a peer that never had the id treats it as a no-op.
+ */
+export type ChatDeletedPayload = {
+  id: string;
+};
+
 // Screen share — mirror of protocol/messages.go Screen* types.
 // See backend file for the lifecycle / state-machine notes; this file only
 // names the wire shapes.
@@ -306,6 +322,7 @@ export type ServerMessage =
   | { event: 'peer-info'; data: PeerInfo }
   | { event: 'peer-state'; data: PeerStatePayload }
   | { event: 'chat'; data: ChatPayload }
+  | { event: 'chat-deleted'; data: ChatDeletedPayload }
   | { event: 'ping'; data: PingPayload }
   | { event: 'offer'; data: OfferEnvelope }
   // The SFU answers the publisher's screen-pub offer — that arrives here as
@@ -335,6 +352,7 @@ export type ClientMessage =
   | { event: 'set-displayname'; data: SetDisplayNamePayload }
   | { event: 'set-state'; data: SetStatePayload }
   | { event: 'chat-send'; data: ChatSendPayload }
+  | { event: 'chat-delete'; data: ChatDeletePayload }
   | { event: 'ping'; data: { to: string } }
   /** Asks the server for a fresh offer after a publisher-side track change. */
   | { event: 'renegotiate'; data?: undefined }
@@ -588,6 +606,18 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         }
       }
       return { event, data: data as ChatPayload };
+    }
+
+    case 'chat-deleted': {
+      if (
+        typeof data !== 'object' ||
+        data === null ||
+        typeof (data as Record<string, unknown>).id !== 'string'
+      ) {
+        console.warn("[protocol] malformed 'chat-deleted' payload:", data);
+        return null;
+      }
+      return { event, data: data as ChatDeletedPayload };
     }
 
     case 'ping': {

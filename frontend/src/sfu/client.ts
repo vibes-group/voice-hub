@@ -7,6 +7,7 @@ import {
   type PeerStatePayload,
   type ChatPayload,
   type ChatSendPayload,
+  type ChatDeletedPayload,
   type PingPayload,
   type ScreenShareAvailablePayload,
   type ScreenShareEndedPayload,
@@ -46,6 +47,7 @@ export type SFUHandlers = {
   onPeerInfo: (data: PeerInfo) => void;
   onPeerState: (data: PeerStatePayload) => void;
   onChat: (data: ChatPayload) => void;
+  onChatDeleted: (data: ChatDeletedPayload) => void;
   onPing: (data: PingPayload) => void;
   onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
   onScreenShareAvailable: (data: ScreenShareAvailablePayload) => void;
@@ -78,6 +80,7 @@ export type SFUClient = {
   setDisplayName(name: string): void;
   sendSetState(selfMuted: boolean, deafened: boolean): void;
   sendChat(payload: ChatSendPayload): void;
+  sendChatDelete(id: string): void;
   sendPing(targetId: string): void;
   getPeerConnection(): RTCPeerConnection | null;
   startScreenShare(): Promise<void>;
@@ -106,6 +109,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onPeerInfo: handlers.onPeerInfo ?? noop,
     onPeerState: handlers.onPeerState ?? noop,
     onChat: handlers.onChat ?? noop,
+    onChatDeleted: handlers.onChatDeleted ?? noop,
     onPing: handlers.onPing ?? noop,
     onTrack: handlers.onTrack ?? noop,
     onScreenShareAvailable: handlers.onScreenShareAvailable ?? noop,
@@ -310,6 +314,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         break;
       case 'chat':
         on.onChat(msg.data);
+        break;
+      case 'chat-deleted':
+        on.onChatDeleted(msg.data);
         break;
       case 'ping':
         on.onPing(msg.data);
@@ -947,6 +954,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     send('chat-send', payload);
   }
 
+  function sendChatDelete(id: string): void {
+    send('chat-delete', { id });
+  }
+
   function sendPing(targetId: string): void {
     send('ping', { to: targetId });
   }
@@ -982,6 +993,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     setDisplayName,
     sendSetState,
     sendChat,
+    sendChatDelete,
     sendPing,
     getPeerConnection,
     startScreenShare,

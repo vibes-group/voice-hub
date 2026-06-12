@@ -100,8 +100,9 @@ function pruneChatHistory(messages: PersistedChatMessage[]): {
   return { kept, dropped };
 }
 
-// Frees the IndexedDB bytes of dropped messages' attachments (fire-and-forget).
-function deleteDroppedBlobs(dropped: PersistedChatMessage[]): void {
+// Frees the IndexedDB bytes of removed messages' attachments (fire-and-forget).
+// Shared by history pruning and explicit message deletion.
+export function deleteDroppedBlobs(dropped: PersistedChatMessage[]): void {
   for (const m of dropped) {
     for (const a of m.attachments ?? []) void deleteBlob(a.uploadId);
   }
