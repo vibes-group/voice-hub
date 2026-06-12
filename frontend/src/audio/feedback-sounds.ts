@@ -1,11 +1,11 @@
 // Two distinct mute/unmute audio cues, synthesised via Web Audio (no asset pipeline).
-// Mute (going off):  880 → 440 Hz descending.
-// Unmute (going on): 440 → 880 Hz ascending.
+// The pair contrasts on two axes at once so the two are never confused:
+// Mute (going off): dull triangle, descending 520 → 300 Hz.
+// Unmute (going on): bright sine, wide ascending sweep 392 → 880 Hz.
 
-const PEAK = 0.15;
-const DURATION = 0.09;
+const DURATION = 0.12;
 
-function playGlide(from: number, to: number): void {
+function playGlide(from: number, to: number, type: OscillatorType, peak: number): void {
   let ctx: AudioContext;
   try {
     ctx = new AudioContext({ sampleRate: 48000 });
@@ -15,11 +15,11 @@ function playGlide(from: number, to: number): void {
   const t0 = ctx.currentTime;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-  osc.type = 'sine';
+  osc.type = type;
   osc.frequency.setValueAtTime(from, t0);
   osc.frequency.exponentialRampToValueAtTime(to, t0 + DURATION);
   gain.gain.setValueAtTime(0, t0);
-  gain.gain.linearRampToValueAtTime(PEAK, t0 + 0.005);
+  gain.gain.linearRampToValueAtTime(peak, t0 + 0.005);
   gain.gain.linearRampToValueAtTime(0, t0 + DURATION);
   osc.connect(gain);
   gain.connect(ctx.destination);
@@ -29,11 +29,11 @@ function playGlide(from: number, to: number): void {
 }
 
 export function playMuteSound(): void {
-  playGlide(880, 440);
+  playGlide(520, 300, 'triangle', 0.2);
 }
 
 export function playUnmuteSound(): void {
-  playGlide(440, 880);
+  playGlide(392, 880, 'sine', 0.16);
 }
 
 export function playPing(): void {
