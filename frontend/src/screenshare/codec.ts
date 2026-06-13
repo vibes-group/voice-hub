@@ -1,6 +1,6 @@
 import { buildScreenParams, type ScreenCodecPref } from './params';
-
-export type ScreenVideoCodec = 'av1' | 'vp9';
+// ScreenVideoCodec lives in the protocol mirror (Go is the source of truth).
+import type { ScreenVideoCodec } from '../sfu/protocol';
 
 type Codec = RTCRtpCodec & { mimeType: string };
 
@@ -93,7 +93,7 @@ export function primeScreenCodecProfile(): Promise<ScreenCodecSupport> {
   return supportProbe;
 }
 
-export function getScreenCodecSupportSync(): ScreenCodecSupport {
+function getScreenCodecSupportSync(): ScreenCodecSupport {
   if (lastSupport) return lastSupport;
   const senderCaps = senderVideoCapabilities();
   const receiverCaps = receiverVideoCapabilities();

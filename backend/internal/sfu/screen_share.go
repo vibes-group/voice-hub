@@ -269,14 +269,11 @@ func (r *Room) setupScreenPubPC(p *peer, data protocol.ScreenShareStartData) (se
 
 	ctx, cancel := context.WithCancel(p.ctx)
 
-	cleanup := func() {
-		pc.Close()
-		cancel()
-		r.sendScreenShareError(p, "", protocol.ReasonInternal)
-	}
 	defer func() {
 		if err != nil {
-			cleanup()
+			pc.Close()
+			cancel()
+			r.sendScreenShareError(p, "", protocol.ReasonInternal)
 		}
 	}()
 

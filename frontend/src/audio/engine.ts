@@ -32,16 +32,12 @@ export function isCaptureEngine(engine: EngineKind): boolean {
   return engine in CAPTURE_ENGINE_LABELS;
 }
 
-export function getEngineLabel(engine: string): string | null {
+export function formatEngine(engine: string): string {
   if (engine === 'off') return 'Выкл.';
   if (engine in CAPTURE_ENGINE_LABELS) {
     return CAPTURE_ENGINE_LABELS[engine as keyof typeof CAPTURE_ENGINE_LABELS];
   }
-  return getDenoiser(engine)?.label ?? null;
-}
-
-export function formatEngine(engine: string): string {
-  return getEngineLabel(engine) ?? engine;
+  return getDenoiser(engine)?.label ?? engine;
 }
 
 export function preloadEngine(engine: EngineKind): Promise<void> {

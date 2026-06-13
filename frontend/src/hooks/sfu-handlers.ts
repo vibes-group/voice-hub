@@ -10,7 +10,7 @@ import type { SFUHandlers } from '../sfu/client';
 import { screenShareErrorRu } from '../screenshare/errors';
 import { createReconnectScheduler } from '../utils/reconnect';
 
-export type SFUHandlerDeps = {
+type SFUHandlerDeps = {
   display: string;
   audio: ReturnType<typeof useAudioEngine>;
   sfu: ReturnType<typeof useSFU>;

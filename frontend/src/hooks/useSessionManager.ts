@@ -35,13 +35,13 @@ import type { EngineKind, ParticipantUI } from '../types';
 import type { RoomSlug } from '../rooms';
 import type { MicGraph } from '../audio/mic-graph';
 
-export type UseSessionManagerDeps = {
+type UseSessionManagerDeps = {
   audio: ReturnType<typeof useAudioEngine>;
   sfu: ReturnType<typeof useSFU>;
   onTauriToggleMute: () => void;
 };
 
-export type UseSessionManagerReturn = {
+type UseSessionManagerReturn = {
   join: (name: string) => Promise<void>;
   leave: () => void;
   switchRoom: (slug: RoomSlug) => Promise<void>;

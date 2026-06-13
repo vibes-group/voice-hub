@@ -111,7 +111,7 @@ function pickEffectiveSettings(
   return { resolution: p.resolution, fps: p.fps, codec: s.codec, shareMode: p.shareMode };
 }
 
-export function getEffectiveSettings(): EffectiveSettings {
+function getEffectiveSettings(): EffectiveSettings {
   return pickEffectiveSettings(useScreenShareSettingsStore.getState());
 }
 

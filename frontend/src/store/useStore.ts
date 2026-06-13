@@ -30,7 +30,7 @@ import type { Attachment } from '../sfu/protocol';
 export type ChatMessage = PersistedChatMessage;
 
 export type JoinState = 'idle' | 'joining' | 'joined';
-export type StatusState = 'idle' | 'ok' | 'err';
+type StatusState = 'idle' | 'ok' | 'err';
 
 function compareParticipants(a: ParticipantUI, b: ParticipantUI): number {
   if (a.isSelf) return -1;

@@ -891,16 +891,21 @@ func (r *Room) broadcastChat(sender *peer, cs protocol.ChatSendPayload) {
 	})
 	env, _ := json.Marshal(protocol.Envelope{Event: "chat", Data: payload})
 
+	for _, p := range r.snapshotPeers() {
+		_ = p.writeRaw(env)
+	}
+}
+
+// snapshotPeers returns a copy of the current peer set, safe to range over
+// without holding r.mu.
+func (r *Room) snapshotPeers() []*peer {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	all := make([]*peer, 0, len(r.peers))
 	for _, p := range r.peers {
 		all = append(all, p)
 	}
-	r.mu.Unlock()
-
-	for _, p := range all {
-		_ = p.writeRaw(env)
-	}
+	return all
 }
 
 // broadcastChatDelete echoes a retraction to all peers including the requester,
@@ -918,14 +923,7 @@ func (r *Room) broadcastChatDelete(sender *peer, id string) {
 	payload, _ := json.Marshal(protocol.ChatDeletedPayload{ID: id})
 	env, _ := json.Marshal(protocol.Envelope{Event: "chat-deleted", Data: payload})
 
-	r.mu.Lock()
-	all := make([]*peer, 0, len(r.peers))
-	for _, p := range r.peers {
-		all = append(all, p)
-	}
-	r.mu.Unlock()
-
-	for _, p := range all {
+	for _, p := range r.snapshotPeers() {
 		_ = p.writeRaw(env)
 	}
 }

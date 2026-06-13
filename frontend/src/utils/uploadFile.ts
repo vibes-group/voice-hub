@@ -74,7 +74,7 @@ export function uploadFile(file: Blob, roomId: string, opts: UploadOptions): Pro
   });
 }
 
-export type ImageMeta = {
+type ImageMeta = {
   width: number;
   height: number;
   blurThumb: string;

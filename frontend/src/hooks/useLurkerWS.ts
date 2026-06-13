@@ -6,7 +6,7 @@ import type { ChatPayload, ChatDeletedPayload, PingPayload } from '../sfu/protoc
 import { useStore } from '../store/useStore';
 import { retryPendingChats } from '../utils/chat-retry';
 
-export type UseLurkerWSDeps = {
+type UseLurkerWSDeps = {
   /**
    * Display name to send in the lurker hello. Should stay in sync with the
    * value the user is editing (same source as the voice hello).
@@ -25,7 +25,7 @@ export type UseLurkerWSDeps = {
   voiceActive: boolean;
 };
 
-export type UseLurkerWSReturn = {
+type UseLurkerWSReturn = {
   /** Send a chat message via the lurker WS. No-op when not connected. */
   sendChat: (payload: import('../sfu/protocol').ChatSendPayload) => void;
   /** Retract a message by id via the lurker WS. Returns false when not connected. */

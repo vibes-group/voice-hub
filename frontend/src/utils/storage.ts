@@ -176,7 +176,7 @@ export function loadBoolean(key: string, fallback: boolean): boolean {
 // Typed helpers — one load/save pair per persisted domain value
 // ---------------------------------------------------------------------------
 
-export function loadDisplayName(): string {
+function loadDisplayName(): string {
   return localStorage.getItem(KEYS.displayName) ?? '';
 }
 
@@ -194,10 +194,6 @@ export function loadOrCreateDisplayName(generate: () => string): string {
   const fresh = generate();
   saveDisplayName(fresh);
   return fresh;
-}
-
-export function clearDisplayName(): void {
-  localStorage.removeItem(KEYS.displayName);
 }
 
 export function makeGuestName(): string {

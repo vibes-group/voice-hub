@@ -94,12 +94,8 @@ pub async fn check(app: AppHandle, force: bool) {
 
     match shared.lock() {
         Ok(mut s) => {
-            if !force {
-                if let Some(prev) = s.last_checked {
-                    if prev.elapsed() < FOCUS_THROTTLE {
-                        return;
-                    }
-                }
+            if !force && s.last_checked.is_some_and(|prev| prev.elapsed() < FOCUS_THROTTLE) {
+                return;
             }
             s.last_checked = Some(Instant::now());
         }
@@ -126,11 +122,7 @@ pub async fn check(app: AppHandle, force: bool) {
     let version = update.version.clone();
     match shared.lock() {
         Ok(mut s) => {
-            let already_known = s
-                .pending
-                .as_ref()
-                .map(|u| u.version == version)
-                .unwrap_or(false);
+            let already_known = s.pending.as_ref().is_some_and(|u| u.version == version);
             s.pending = Some(update);
             if already_known {
                 return;

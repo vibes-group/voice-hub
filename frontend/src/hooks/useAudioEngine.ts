@@ -28,7 +28,7 @@ function getAudioSender(pc: RTCPeerConnection | null): RTCRtpSender | null {
   return pc?.getSenders().find((s) => s.track?.kind === 'audio') ?? null;
 }
 
-export type AudioEngineRef = {
+type AudioEngineRef = {
   rawLocalStream: MediaStream | null;
   rawLocalStreamUsesBrowserNs: boolean | null;
   micGraph: MicGraph | null;
@@ -38,7 +38,6 @@ export type AudioEngineRef = {
 };
 
 export function useAudioEngine() {
-  const setStatus = useStore((s) => s.setStatus);
   const refs = useRef<AudioEngineRef>({
     rawLocalStream: null,
     rawLocalStreamUsesBrowserNs: null,
@@ -101,13 +100,13 @@ export function useAudioEngine() {
         stream,
         engine,
         () => useStore.getState().sendVolume,
-        (msg, isError) => setStatus(msg, isError),
+        (msg, isError) => useStore.getState().setStatus(msg, isError),
         prebuiltContext,
       );
       r.micGraph = graph;
       return graph;
     },
-    [setStatus],
+    [],
   );
 
   const clearLocalGraph = useCallback(() => {

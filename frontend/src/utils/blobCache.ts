@@ -16,7 +16,7 @@ const DB_VERSION = 2;
 // deletes its blobs), so this size cap is the only blob-level limit.
 const MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 
-export type CachedBlob = {
+type CachedBlob = {
   uploadId: string;
   blob: Blob;
   savedAt: number;

@@ -90,10 +90,10 @@ export function buildScreenParams(
   };
 }
 
-export type ScreenPresetId = 'gaming' | 'screenshare';
+type ScreenPresetId = 'gaming' | 'screenshare';
 export type ScreenMode = ScreenPresetId | 'custom';
 
-export type ScreenPreset = {
+type ScreenPreset = {
   id: ScreenPresetId;
   label: string;
   resolution: ScreenResolution;

@@ -72,8 +72,7 @@ func (r *Room) attemptSync() (retry bool) {
 	for _, p := range r.peers {
 		peers = append(peers, p)
 	}
-	tracks := make(map[string]*webrtc.TrackLocalStaticRTP, len(r.tracks))
-	maps.Copy(tracks, r.tracks)
+	tracks := maps.Clone(r.tracks)
 	r.mu.Unlock()
 
 	for _, p := range peers {
