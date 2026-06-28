@@ -35,6 +35,17 @@ type Config struct {
 	TurnSharedSecret string
 }
 
+// Tuning values that are never overridden per-deploy are constants, not env
+// knobs. The per-file ceiling mirrors the frontend's hardcoded MAX_UPLOAD_BYTES
+// — the static frontend can't read backend env, so both sides keep a literal in
+// lockstep rather than a backend-only env that the frontend can't follow.
+const (
+	uploadMaxBytes   = 100 << 20 // 100 MB per file
+	uploadTotalBytes = 1 << 30   // 1 GB on disk, all rooms combined
+	uploadTTL        = 5 * time.Minute
+	uploadTTLHardCap = 30 * time.Minute
+)
+
 func Load() (Config, error) {
 	hostname := env("APP_HOSTNAME", "localhost")
 	trusted, err := ParseTrustedProxies(os.Getenv("APP_TRUSTED_PROXIES"))
@@ -46,7 +57,7 @@ func Load() (Config, error) {
 		WebDir:         env("APP_WEB_DIR", "../frontend/dist"),
 		AppHostname:    hostname,
 		PublicIP:       os.Getenv("PUBLIC_IP"),
-		TurnRealm:      env("TURN_REALM", hostname),
+		TurnRealm:      hostname,
 		AdminPassword:  os.Getenv("APP_ADMIN_PASSWORD"),
 		CookieSecure:   envBool("APP_COOKIE_SECURE", true),
 		UDPPortMin:     envUint16("UDP_PORT_MIN", 10101),
@@ -55,11 +66,11 @@ func Load() (Config, error) {
 		TurnRelayMax:   envUint16("TURN_RELAY_PORT_MAX", 49199),
 		TrustedProxies: trusted,
 
-		UploadMaxBytes:   envInt64("UPLOAD_MAX_BYTES", 100<<20),
-		UploadTempDir:    env("UPLOAD_TEMP_DIR", os.TempDir()),
-		UploadTTL:        time.Duration(envInt64("UPLOAD_TTL_SECONDS", 300)) * time.Second,
-		UploadTTLHardCap: time.Duration(envInt64("UPLOAD_TTL_HARD_CAP_SECONDS", 1800)) * time.Second,
-		UploadTotalBytes: envInt64("UPLOAD_TOTAL_BYTES", 1<<30),
+		UploadMaxBytes:   uploadMaxBytes,
+		UploadTempDir:    os.TempDir(),
+		UploadTTL:        uploadTTL,
+		UploadTTLHardCap: uploadTTLHardCap,
+		UploadTotalBytes: uploadTotalBytes,
 	}, nil
 }
 
@@ -80,21 +91,6 @@ func envBool(key string, fallback bool) bool {
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		log.Printf("config: bad %s=%q (%v), using default %v", key, value, err, fallback)
-		return fallback
-	}
-
-	return parsed
-}
-
-func envInt64(key string, fallback int64) int64 {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		log.Printf("config: bad %s=%q (%v), using default %d", key, value, err, fallback)
 		return fallback
 	}
 
