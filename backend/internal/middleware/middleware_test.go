@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"voice-hub/backend/internal/auth"
+	"voice-hub/backend/internal/ratelimit"
+
+	"golang.org/x/time/rate"
 )
 
 // loopbackTrusted matches what config.DefaultTrustedProxies returns; mirrored
@@ -21,6 +24,46 @@ import (
 var loopbackTrusted = []netip.Prefix{
 	netip.MustParsePrefix("127.0.0.0/8"),
 	netip.MustParsePrefix("::1/128"),
+}
+
+func TestRateLimitAPI(t *testing.T) {
+	l := ratelimit.New(ratelimit.Config{Rate: rate.Every(time.Hour), Burst: 2})
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := RateLimitAPI(l, loopbackTrusted, ok)
+
+	// RemoteAddr is loopback (trusted), so XFF identifies the client. Burst of 2
+	// passes, the 3rd is throttled with a Retry-After hint.
+	do := func(path, xff string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.RemoteAddr = "127.0.0.1:5000"
+		r.Header.Set("X-Forwarded-For", xff)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec
+	}
+
+	for i := 0; i < 2; i++ {
+		if got := do("/api/x", "1.2.3.4").Code; got != http.StatusOK {
+			t.Fatalf("/api req %d: got %d, want 200", i, got)
+		}
+	}
+	rec := do("/api/x", "1.2.3.4")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("over-budget /api: got %d, want 429", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After on 429")
+	}
+
+	// Non-/api paths are exempt even when that client is over budget.
+	if got := do("/", "1.2.3.4").Code; got != http.StatusOK {
+		t.Fatalf("non-/api path should be exempt, got %d", got)
+	}
+
+	// A different real client gets a fresh bucket.
+	if got := do("/api/x", "5.6.7.8").Code; got != http.StatusOK {
+		t.Fatalf("fresh client should pass, got %d", got)
+	}
 }
 
 func TestClientIP(t *testing.T) {

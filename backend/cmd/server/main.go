@@ -20,11 +20,13 @@ import (
 	"voice-hub/backend/internal/handler"
 	"voice-hub/backend/internal/middleware"
 	"voice-hub/backend/internal/presence"
+	"voice-hub/backend/internal/ratelimit"
 	"voice-hub/backend/internal/sfu"
 	"voice-hub/backend/internal/sfu/protocol"
 	turnsrv "voice-hub/backend/internal/turn"
 
 	"github.com/pion/webrtc/v4"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -117,9 +119,13 @@ func main() {
 
 	mux := wireRoutes(cfg, adminVer, version, connPass, wsRegistry, limiter, rooms, presenceHub, fileStore, stunURL, turnURL)
 
+	// Global per-IP backstop over /api: defense-in-depth above the per-login
+	// AuthLimiter (e.g. a distributed flood driving argon2 cost on /api/login).
+	apiLimiter := ratelimit.New(ratelimit.Config{Rate: rate.Limit(5), Burst: 60})
+
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           middleware.AccessLog(cfg.TrustedProxies, mux),
+		Handler:           middleware.AccessLog(cfg.TrustedProxies, middleware.RateLimitAPI(apiLimiter, cfg.TrustedProxies, mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		// ReadTimeout/WriteTimeout intentionally unset: /ws is a long-lived
 		// WebSocket and per-request timeouts would terminate it. Auth gates

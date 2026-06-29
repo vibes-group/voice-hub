@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
 	"voice-hub/backend/internal/auth"
+	"voice-hub/backend/internal/ratelimit"
 )
 
 // statusRecorder captures the response status code written by a handler so
@@ -41,6 +43,26 @@ func AccessLog(trusted []netip.Prefix, next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 		log.Printf("http %s %q %d %s ip=%q",
 			r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond), ClientIP(r, trusted))
+	})
+}
+
+// RateLimitAPI is a per-IP token-bucket backstop over the /api surface, keyed on
+// the same client identity as AccessLog. The WebSocket, static assets, and
+// health probe are exempt: /ws is long-lived (one connection, not a request
+// stream) and the rest are cheap. It is defense-in-depth on top of the per-login
+// AuthLimiter, capping any single IP's overall /api request rate.
+func RateLimitAPI(l *ratelimit.Limiter, trusted []netip.Prefix, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if ok, retry := l.Allow(ClientIP(r, trusted)); !ok {
+				if retry > 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(max(int((retry+time.Second-1)/time.Second), 1)))
+				}
+				http.Error(w, "rate limited", http.StatusTooManyRequests)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
