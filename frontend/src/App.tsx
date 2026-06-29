@@ -24,7 +24,7 @@ import { PingCard } from './components/PingCard';
 import { ScreenShareButton } from './components/ScreenShareButton';
 import { ScreenShareGallery } from './components/ScreenShareGallery';
 import { ScreenShareFocused } from './components/ScreenShareFocused';
-import { useScreenShareStore } from './store/useScreenShareStore';
+import { selectOtherShares, useScreenShareStore } from './store/useScreenShareStore';
 import { useAppVersion } from './hooks/useAppVersion';
 import { useLurkerWS } from './hooks/useLurkerWS';
 
@@ -294,8 +294,8 @@ export function App() {
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) {
         return;
       }
-      const ids = Array.from(useScreenShareStore.getState().shares.keys()).filter(
-        (id) => id !== selfId,
+      const ids = selectOtherShares(useScreenShareStore.getState().shares, selfId).map(
+        (sh) => sh.publisherId,
       );
       if (ids.length < 2) return;
       const idx = ids.indexOf(current);

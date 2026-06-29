@@ -33,10 +33,10 @@ export type JoinState = 'idle' | 'joining' | 'joined';
 type StatusState = 'idle' | 'ok' | 'err';
 
 function compareParticipants(a: ParticipantUI, b: ParticipantUI): number {
-  if (a.isSelf) return -1;
-  if (b.isSelf) return 1;
-  // Stable by clientId (per-install) so renames don't reorder. Fallback to
-  // peer id for peers without a clientId.
+  // Order purely by a stable key so every client renders the same sequence.
+  // No self-first: that key differs per device and would make the global order
+  // disagree between clients. Stable by clientId (per-install) so renames don't
+  // reorder; fallback to peer id for peers without a clientId.
   return (a.clientId ?? a.id).localeCompare(b.clientId ?? b.id);
 }
 

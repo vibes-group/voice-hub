@@ -1,4 +1,4 @@
-import { useScreenShareStore } from '../store/useScreenShareStore';
+import { selectOtherShares, useScreenShareStore } from '../store/useScreenShareStore';
 import { ScreenShareTile } from './ScreenShareTile';
 import { selectSelfPeerId, useStore } from '../store/useStore';
 
@@ -10,7 +10,7 @@ export function ScreenShareGallery({ onTileClick }: Props) {
   const shares = useScreenShareStore((s) => s.shares);
   const selfId = useStore(selectSelfPeerId);
 
-  const list = Array.from(shares.values()).filter((share) => share.publisherId !== selfId);
+  const list = selectOtherShares(shares, selfId);
   if (list.length === 0) return null;
 
   return (

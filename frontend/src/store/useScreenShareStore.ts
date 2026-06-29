@@ -21,6 +21,18 @@ export type ScreenShare = {
  * happening in the room, not what we're publishing). */
 export type MyShareStatus = 'idle' | 'starting' | 'publishing' | 'stopping';
 
+/** Remote shares (everyone but us), ordered by publisherId so every client
+ * shows them — and navigates them with ←/→ — in the same order. Map iteration
+ * is WS-arrival order, which differs between peers. */
+export function selectOtherShares(
+  shares: Map<string, ScreenShare>,
+  selfId: string | null,
+): ScreenShare[] {
+  return Array.from(shares.values())
+    .filter((sh) => sh.publisherId !== selfId)
+    .sort((a, b) => a.publisherId.localeCompare(b.publisherId));
+}
+
 export type ScreenShareState = {
   shares: Map<string, ScreenShare>;
   upsertShare: (share: ScreenShare) => void;
