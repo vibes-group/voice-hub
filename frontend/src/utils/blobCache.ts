@@ -89,16 +89,6 @@ export async function getBlob(uploadId: string): Promise<Blob | null> {
   }
 }
 
-export async function hasBlob(uploadId: string): Promise<boolean> {
-  if (!supported()) return false;
-  try {
-    const key = await request<IDBValidKey | undefined>('readonly', (s) => s.getKey(uploadId));
-    return key !== undefined;
-  } catch {
-    return false;
-  }
-}
-
 export async function deleteBlob(uploadId: string): Promise<void> {
   if (!supported()) return;
   try {

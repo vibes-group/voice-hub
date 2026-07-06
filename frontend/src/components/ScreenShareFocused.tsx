@@ -3,7 +3,7 @@ import { Volume2, VolumeX, X } from 'lucide-react';
 import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
-import { useVideoFps, useVideoStream } from '../screenshare/useVideoFps';
+import { formatVideoStats, useVideoFps, useVideoStream } from '../screenshare/useVideoFps';
 
 type Props = {
   onClose: () => void;
@@ -92,8 +92,7 @@ export function ScreenShareFocused({ onClose }: Props) {
 
   if (!focusedId) return null;
 
-  const qualityLabel = videoSize ? `${videoSize.w}×${videoSize.h}` : null;
-  const fpsLabel = fps !== null ? `${Math.round(fps)}fps` : null;
+  const { qualityLabel, fpsLabel } = formatVideoStats(videoSize, fps);
   const ended = !shareStillLive;
 
   return (

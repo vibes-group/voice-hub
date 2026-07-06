@@ -54,7 +54,7 @@ export const KEYS = {
 // sessions where the user just reads without writing. No migration from the
 // former localStorage location — any pre-existing history is simply abandoned.
 export const CHAT_HISTORY_CAP = 1000;
-export const CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type PersistedChatMessage = {
   id: string;

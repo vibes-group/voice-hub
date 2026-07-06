@@ -7,7 +7,7 @@ import type { ParticipantUI } from '../types';
 interface Props {
   participant: ParticipantUI;
   onRemoteGainChange: () => void;
-  onPing?: (targetId: string) => void;
+  onPing: (targetId: string) => void;
 }
 
 function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) {
@@ -142,7 +142,7 @@ function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) 
       className={`grid gap-3 px-4 ${participant.isSelf ? 'h-[72px] items-center' : 'py-3'} transition-[border-color,background] duration-75 ${rowClass}`}
     >
       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] gap-3 items-center">
-        {!participant.isSelf && onPing != null ? (
+        {!participant.isSelf ? (
           <button
             type="button"
             disabled={pingCoolingDown}

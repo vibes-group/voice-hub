@@ -80,7 +80,6 @@ func (*vp9) Parse(pkt *rtp.Packet) (*dd.Descriptor, error) {
 			off++
 		}
 	}
-	_ = off
 
 	// Keyframe markers in VP9 RTP: !P (not inter-predicted) AND B
 	// (start of frame). The B gate excludes intermediate packets of the

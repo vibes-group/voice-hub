@@ -125,7 +125,7 @@ func (r *Room) finishScreenSubSetup(
 	session.mu.Unlock()
 
 	r.mu.Lock()
-	sub.screenSubs[session.PublisherID] = &screenSubPC{pc: pc}
+	sub.screenSubs[session.PublisherID] = pc
 	r.mu.Unlock()
 
 	go r.forwardScreenVideoRTCPToPublisher(session, subEntry, subEntry.videoSender)
@@ -173,7 +173,7 @@ func (r *Room) handleScreenShareSubscribe(sub *peer, data protocol.ScreenShareSu
 		return
 	}
 	if sub.screenSubs == nil {
-		sub.screenSubs = make(map[string]*screenSubPC)
+		sub.screenSubs = make(map[string]*webrtc.PeerConnection)
 	}
 	if _, dup := sub.screenSubs[data.PublisherID]; dup {
 		r.mu.Unlock()

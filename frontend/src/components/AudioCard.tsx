@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
 import { ENGINE_OPTIONS, type ActiveEngineKind } from '../audio/engine';
-import { Toggle } from './Toggle';
+import { ToggleRow } from './Toggle';
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
@@ -174,14 +174,12 @@ export function AudioCard({
       )}
 
       <div className="grid gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="section-label">Шумоподавление</span>
-          <Toggle
-            checked={engine !== 'off'}
-            onChange={() => onEngineSelect(engine === 'off' ? lastVariant : 'off')}
-            ariaLabel="Шумоподавление"
-          />
-        </div>
+        <ToggleRow
+          label="Шумоподавление"
+          checked={engine !== 'off'}
+          onChange={() => onEngineSelect(engine === 'off' ? lastVariant : 'off')}
+          ariaLabel="Шумоподавление"
+        />
 
         {engine !== 'off' && (
           <div className="border-l border-line pl-4 ml-1">

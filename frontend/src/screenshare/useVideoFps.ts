@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react';
 
+/** Format the video dimensions and frame rate for the on-screen overlay. */
+export function formatVideoStats(
+  videoSize: { w: number; h: number } | null,
+  fps: number | null,
+): { qualityLabel: string | null; fpsLabel: string | null } {
+  return {
+    qualityLabel: videoSize ? `${videoSize.w}×${videoSize.h}` : null,
+    fpsLabel: fps !== null ? `${Math.round(fps)}fps` : null,
+  };
+}
+
 /**
  * Attach the stream to the <video> (autoplay, muted — share audio is routed
  * through a sibling <audio>) and track the intrinsic video dimensions.

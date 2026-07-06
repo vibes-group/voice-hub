@@ -20,7 +20,7 @@ export type {
   ChatOnlyClient,
 } from './chat-client';
 export { createChatClient } from './chat-client';
-import { closeWebSocket } from './chat-client';
+import { closeWebSocket, noop } from './chat-client';
 import {
   applyScreenCodecPreferences,
   canReceiveScreenCodec,
@@ -98,7 +98,13 @@ function isFullLayerSet(layers: number[]): boolean {
   return layers.length === 3 && layers.includes(0) && layers.includes(1) && layers.includes(2);
 }
 
-function noop(): void {}
+// Ensure params.encodings[0] exists before tuning it; getParameters() may
+// return an empty encodings array before the first negotiation completes.
+function ensureEncoding(params: RTCRtpSendParameters): void {
+  if (!params.encodings || params.encodings.length === 0) {
+    params.encodings = [{}];
+  }
+}
 
 export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient {
   const on: SFUHandlers = {
@@ -538,9 +544,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   ): Promise<void> {
     params = track ? tabSourceParams(params, track) : params;
     const senderParams = sender.getParameters();
-    if (!senderParams.encodings || senderParams.encodings.length === 0) {
-      senderParams.encodings = [{}];
-    }
+    ensureEncoding(senderParams);
     senderParams.encodings[0] = {
       ...senderParams.encodings[0],
       maxBitrate: scaledBitrate(track, params),
@@ -603,9 +607,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         try {
           const effectiveParams = tabSourceParams(pickedParams, videoTrack);
           const params = videoSender.getParameters();
-          if (!params.encodings || params.encodings.length === 0) {
-            params.encodings = [{}];
-          }
+          ensureEncoding(params);
           params.encodings[0] = {
             ...params.encodings[0],
             ...(selectedCodec === 'av1' ? { scalabilityMode: 'L1T3' } : {}),
@@ -806,9 +808,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     const next = buildScreenParams(eff.resolution, eff.fps, mode);
     const sender = screenPubVideoSender;
     const params = sender.getParameters();
-    if (!params.encodings || params.encodings.length === 0) {
-      params.encodings = [{}];
-    }
+    ensureEncoding(params);
     params.encodings[0] = {
       ...params.encodings[0],
       maxBitrate: scaledBitrate(track, next),
@@ -833,9 +833,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     const sender = screenPubVideoSender;
     if (!sender) return;
     const params = sender.getParameters();
-    if (!params.encodings || params.encodings.length === 0) {
-      params.encodings = [{}];
-    }
+    ensureEncoding(params);
     params.encodings[0] = { ...params.encodings[0], active };
     try {
       await sender.setParameters(params);

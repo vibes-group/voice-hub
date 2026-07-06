@@ -25,7 +25,6 @@ type Session struct {
 	Generation   uint64 // ConnPass entry generation at issue time; user sessions invalidate when this drifts.
 	AdminVersion string // Admin-password fingerprint at issue time; empty for user sessions.
 	EntryID      string // ConnPass entry id at issue time; empty for admin sessions.
-	Expires      time.Time
 }
 
 // AdminPasswordVersion returns a base64url HMAC fingerprint of password
@@ -80,5 +79,5 @@ func Decode(secret []byte, value string) (Session, error) {
 	if time.Now().After(expires) {
 		return Session{}, errors.New("expired")
 	}
-	return Session{Role: role, Generation: gen, AdminVersion: adminVer, EntryID: entryID, Expires: expires}, nil
+	return Session{Role: role, Generation: gen, AdminVersion: adminVer, EntryID: entryID}, nil
 }

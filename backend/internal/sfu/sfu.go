@@ -118,7 +118,7 @@ type peer struct {
 	//    fields so peer-info broadcasts stay in sync without re-reading
 	//    screenSession (avoids touching session under r.mu).
 	screenSession           *ScreenShareSession
-	screenSubs              map[string]*screenSubPC
+	screenSubs              map[string]*webrtc.PeerConnection
 	screenSharing           bool
 	screenSharingHasAudio   bool
 	screenSharingVideoCodec protocol.ScreenVideoCodec
@@ -471,7 +471,7 @@ func (r *Room) handleAnswer(p *peer, env protocol.AnswerEnvelope) {
 			log.Printf("sfu: screen-sub answer (%s→%s) no PC", p.id, env.PublisherID)
 			return
 		}
-		if err := subPC.pc.SetRemoteDescription(env.SessionDescription); err != nil {
+		if err := subPC.SetRemoteDescription(env.SessionDescription); err != nil {
 			log.Printf("sfu: screen-sub set remote (%s→%s): %v", p.id, env.PublisherID, err)
 		}
 	case protocol.PCScreenPub:
@@ -508,7 +508,7 @@ func (r *Room) handleCandidate(p *peer, env protocol.CandidateEnvelope) {
 			log.Printf("sfu: screen-sub candidate (%s→%s) no PC", p.id, env.PublisherID)
 			return
 		}
-		if err := subPC.pc.AddICECandidate(env.ICECandidateInit); err != nil {
+		if err := subPC.AddICECandidate(env.ICECandidateInit); err != nil {
 			log.Printf("sfu: screen-sub add candidate (%s→%s): %v", p.id, env.PublisherID, err)
 		}
 	default:
@@ -739,7 +739,7 @@ func (r *Room) removePeer(id string) {
 	// outbound subscriber PCs OUTSIDE the room lock (each pc.Close acquires
 	// pion-internal locks we don't want crossing with r.mu).
 	session := p.screenSession
-	subs := make([]*screenSubPC, 0, len(p.screenSubs))
+	subs := make([]*webrtc.PeerConnection, 0, len(p.screenSubs))
 	for _, s := range p.screenSubs {
 		subs = append(subs, s)
 	}
@@ -751,7 +751,7 @@ func (r *Room) removePeer(id string) {
 	// inside removeScreenSubscriber, which we don't need here since the
 	// peer is gone — but we still close the PC for clean teardown.
 	for _, s := range subs {
-		_ = s.pc.Close()
+		_ = s.Close()
 	}
 	if session != nil {
 		// Publisher is gone. Arm the grace window; reattach must happen
@@ -810,12 +810,7 @@ func (r *Room) setDisplayName(id, name string) {
 	}
 	p.displayName = name
 	info := peerInfo(p)
-	others := make([]*peer, 0, len(r.peers))
-	for _, op := range r.peers {
-		if op.id != id {
-			others = append(others, op)
-		}
-	}
+	others := r.othersLocked(id)
 	r.mu.Unlock()
 
 	infoData, _ := json.Marshal(info)
@@ -838,12 +833,7 @@ func (r *Room) setState(id string, selfMuted, deafened bool) {
 	p.selfMuted = selfMuted
 	p.deafened = deafened
 	info := peerInfo(p)
-	others := make([]*peer, 0, len(r.peers))
-	for _, op := range r.peers {
-		if op.id != id {
-			others = append(others, op)
-		}
-	}
+	others := r.othersLocked(id)
 	r.mu.Unlock()
 
 	state, _ := json.Marshal(protocol.PeerStatePayload{ID: id, SelfMuted: selfMuted, Deafened: deafened})
@@ -1023,6 +1013,17 @@ func (r *Room) dropTracksForPeer(ownerID string) {
 			delete(r.tracks, k)
 		}
 	}
+}
+
+// othersLocked snapshots the peers other than excludeID. Caller must hold r.mu.
+func (r *Room) othersLocked(excludeID string) []*peer {
+	others := make([]*peer, 0, len(r.peers))
+	for _, op := range r.peers {
+		if op.id != excludeID {
+			others = append(others, op)
+		}
+	}
+	return others
 }
 
 // bitrateToTIDCap returns bwCapNone above the high threshold so a healthy

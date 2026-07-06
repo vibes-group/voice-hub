@@ -52,6 +52,11 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
   const [renameValue, setRenameValue] = useState('');
   const [ttlEditingID, setTtlEditingID] = useState<string | null>(null);
 
+  const commitRename = () => {
+    onRename(entry.id, renameValue);
+    setRenamingID(null);
+  };
+
   return (
     <div
       className={`flex items-center gap-2 px-3 py-2 bg-bg-0 border ${entry.expired ? 'border-[rgba(248,113,113,0.3)] opacity-60' : 'border-line'}`}
@@ -64,10 +69,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  onRename(entry.id, renameValue);
-                  setRenamingID(null);
-                }
+                if (e.key === 'Enter') commitRename();
                 if (e.key === 'Escape') setRenamingID(null);
               }}
               maxLength={64}
@@ -76,7 +78,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
             />
             <button
               type="button"
-              onClick={() => { onRename(entry.id, renameValue); setRenamingID(null); }}
+              onClick={commitRename}
               disabled={busy}
               className="p-1 text-accent hover:bg-[rgba(255,255,255,0.04)]"
               title="Сохранить"

@@ -52,7 +52,7 @@ export function closeWebSocket(ws: WebSocket): void {
   }
 }
 
-function noop(): void {}
+export function noop(): void {}
 
 export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): ChatOnlyClient {
   const on: ChatOnlyHandlers = {

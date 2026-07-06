@@ -74,18 +74,21 @@ pub fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Resul
         .build()
 }
 
+/// The app's default window icon. None only when no icon is configured in
+/// tauri.conf.json. Voice Hub always ships with icons (icons/32x32.png etc.),
+/// so None is unreachable in a correctly-built package.
+pub fn default_icon(app: &AppHandle) -> tauri::image::Image<'static> {
+    app.default_window_icon()
+        .cloned()
+        .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"))
+        .to_owned()
+}
+
 /// Construct the tray icon and attach event handlers. Called once at startup.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, None)?;
-    // default_window_icon() is None only when no icon is configured in
-    // tauri.conf.json. Voice Hub always ships with icons (icons/32x32.png
-    // etc.), so None is unreachable in a correctly-built package.
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"));
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(icon)
+        .icon(default_icon(app))
         .tooltip("Voice Hub")
         .menu(&menu)
         .show_menu_on_left_click(false)

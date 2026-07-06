@@ -40,12 +40,7 @@ func (s *ScreenShareSession) forwardVideo(remote *webrtc.TrackRemote) {
 			desc = nil
 		}
 
-		s.mu.RLock()
-		subs := make([]*screenSubscriber, 0, len(s.subscribers))
-		for _, sub := range s.subscribers {
-			subs = append(subs, sub)
-		}
-		s.mu.RUnlock()
+		subs := s.subscribersSnapshot()
 
 		for _, sub := range subs {
 			sub.maybeForward(pkt, desc, s.PublisherID)

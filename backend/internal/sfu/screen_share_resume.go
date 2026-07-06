@@ -129,12 +129,7 @@ func (r *Room) handleScreenShareResume(p *peer, data protocol.ScreenShareResumeD
 
 	// Snapshot the broadcast list now that r.mu is released.
 	r.mu.Lock()
-	others := make([]*peer, 0, len(r.peers))
-	for _, op := range r.peers {
-		if op.id != p.id {
-			others = append(others, op)
-		}
-	}
+	others := r.othersLocked(p.id)
 	info := peerInfo(p)
 	r.mu.Unlock()
 

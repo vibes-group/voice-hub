@@ -9,6 +9,11 @@ type Mode = 'list' | 'plaintext';
 
 const MAX_ENTRIES = 16;
 
+// Confirm-dialog subject for a ConnPass entry, by its label.
+function describeEntry(label: string): string {
+  return label ? `«${label}»` : 'этот пароль';
+}
+
 export function AdminKeyButton() {
   const isAdmin = useStore((s) => s.role === 'admin');
   const { entries, refresh, create, rotate, rename, revoke, setTTL, disconnectUsers } = useConnPassApi();
@@ -81,7 +86,7 @@ export function AdminKeyButton() {
 
   const handleRotate = useCallback(
     async (id: string, label: string) => {
-      const what = label ? `«${label}»` : 'этот пароль';
+      const what = describeEntry(label);
       if (!window.confirm(`Перегенерировать ${what}? Старый пароль перестанет работать.`)) return;
       await withBusy(async () => {
         const data = await rotate(id);
@@ -95,7 +100,7 @@ export function AdminKeyButton() {
 
   const handleRevoke = useCallback(
     async (id: string, label: string) => {
-      const what = label ? `«${label}»` : 'этот пароль';
+      const what = describeEntry(label);
       if (!window.confirm(`Удалить ${what}?`)) return;
       await withBusy(async () => {
         await revoke(id);

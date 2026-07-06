@@ -79,22 +79,22 @@ func (l *Limiter) bucketLocked(key string, now time.Time) *bucket {
 		return b
 	}
 	if len(l.buckets) >= l.cfg.MaxKeys {
-		evictOldest(l.buckets, func(b *bucket) time.Time { return b.lastSeen }, l.cfg.TTL, now)
+		evictOldest(l.buckets, l.cfg.TTL, now)
 	}
 	b := &bucket{lim: rate.NewLimiter(l.cfg.Rate, l.cfg.Burst), lastSeen: now}
 	l.buckets[key] = b
 	return b
 }
 
-// evictOldest drops every key idle past ttl and, if that freed nothing, the
-// single oldest key — guaranteeing room for one more under the cap. Caller holds
-// the lock. seen extracts each entry's last-seen time.
-func evictOldest[V any](m map[string]V, seen func(V) time.Time, ttl time.Duration, now time.Time) {
+// evictOldest drops every bucket idle past ttl and, if that freed nothing, the
+// single oldest bucket — guaranteeing room for one more under the cap. Caller
+// holds the lock.
+func evictOldest(m map[string]*bucket, ttl time.Duration, now time.Time) {
 	var oldestKey string
 	var oldestSeen time.Time
 	freed := false
-	for k, v := range m {
-		ls := seen(v)
+	for k, b := range m {
+		ls := b.lastSeen
 		if now.Sub(ls) > ttl {
 			delete(m, k)
 			freed = true

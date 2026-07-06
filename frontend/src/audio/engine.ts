@@ -16,7 +16,7 @@ const CAPTURE_ENGINE_IDS = Object.keys(CAPTURE_ENGINE_LABELS) as Exclude<
   'off' | DenoiserId
 >[];
 
-export type EngineOption = {
+type EngineOption = {
   value: ActiveEngineKind;
   label: string;
 };

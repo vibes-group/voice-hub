@@ -176,11 +176,7 @@ pub fn run() {
 
             updater::init(&handle)?;
 
-            let base_icon = app
-                .default_window_icon()
-                .cloned()
-                .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"))
-                .to_owned();
+            let base_icon = tray::default_icon(&handle);
 
             static ALERT_PNG: &[u8] = include_bytes!("../icons/tray-alert.png");
             let alert_icon = decode_png_rgba(ALERT_PNG)

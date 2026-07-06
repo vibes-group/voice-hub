@@ -23,29 +23,17 @@ import {
 } from '../screenshare/params';
 import { KEYS } from '../utils/storage';
 
-function loadResolution(): ScreenResolution {
-  const raw = localStorage.getItem(KEYS.screenResolution);
-  return isScreenResolution(raw) ? raw : DEFAULT_SCREEN_RESOLUTION;
-}
-
-function loadFps(): ScreenFps {
-  const raw = Number(localStorage.getItem(KEYS.screenFps));
-  return isScreenFps(raw) ? raw : DEFAULT_SCREEN_FPS;
-}
-
-function loadCodec(): ScreenCodecPref {
-  const raw = localStorage.getItem(KEYS.screenCodec);
-  return isScreenCodecPref(raw) ? raw : DEFAULT_SCREEN_CODEC;
-}
-
-function loadMode(): ScreenMode {
-  const raw = localStorage.getItem(KEYS.screenMode);
-  return isScreenMode(raw) ? raw : DEFAULT_SCREEN_MODE;
-}
-
-function loadShareMode(): ShareMode {
-  const raw = localStorage.getItem(KEYS.screenShareMode);
-  return isShareMode(raw) ? raw : DEFAULT_SHARE_MODE;
+// Read a persisted setting, validating it against its type guard and falling
+// back to the default. parse lets fps coerce the stored string to a number.
+function loadValidated<T>(
+  key: string,
+  isValid: (v: unknown) => v is T,
+  fallback: T,
+  parse?: (raw: string | null) => unknown,
+): T {
+  const stored = localStorage.getItem(key);
+  const raw = parse ? parse(stored) : stored;
+  return isValid(raw) ? raw : fallback;
 }
 
 type State = {
@@ -62,11 +50,15 @@ type State = {
 };
 
 export const useScreenShareSettingsStore = create<State>((set) => ({
-  mode: loadMode(),
-  shareMode: loadShareMode(),
-  codec: loadCodec(),
-  customResolution: loadResolution(),
-  customFps: loadFps(),
+  mode: loadValidated(KEYS.screenMode, isScreenMode, DEFAULT_SCREEN_MODE),
+  shareMode: loadValidated(KEYS.screenShareMode, isShareMode, DEFAULT_SHARE_MODE),
+  codec: loadValidated(KEYS.screenCodec, isScreenCodecPref, DEFAULT_SCREEN_CODEC),
+  customResolution: loadValidated(
+    KEYS.screenResolution,
+    isScreenResolution,
+    DEFAULT_SCREEN_RESOLUTION,
+  ),
+  customFps: loadValidated(KEYS.screenFps, isScreenFps, DEFAULT_SCREEN_FPS, Number),
   setMode: (m) => {
     localStorage.setItem(KEYS.screenMode, m);
     set({ mode: m });

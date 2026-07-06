@@ -55,7 +55,7 @@ export function saveBinding(binding: InputBinding | null): void {
 }
 
 // Canonical label for a modifier code (left/right collapsed).
-export function modifierLabelFromCode(code: string): string | null {
+function modifierLabelFromCode(code: string): string | null {
   switch (code) {
     case 'ControlLeft':
     case 'ControlRight':

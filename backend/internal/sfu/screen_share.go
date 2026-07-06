@@ -241,6 +241,18 @@ func (s *ScreenShareSession) Mode() protocol.ScreenShareMode {
 	return decodeMode(s.mode.Load())
 }
 
+// subscribersSnapshot returns the current subscribers under RLock so callers
+// can iterate without holding s.mu.
+func (s *ScreenShareSession) subscribersSnapshot() []*screenSubscriber {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	subs := make([]*screenSubscriber, 0, len(s.subscribers))
+	for _, sub := range s.subscribers {
+		subs = append(subs, sub)
+	}
+	return subs
+}
+
 // setupScreenPubPC creates the publisher PC, performs the SDP exchange, and
 // builds the ScreenShareSession. Returns the session (which owns the PC and
 // cancel func) together with the negotiated answer SDP on success. On any
@@ -472,12 +484,7 @@ func (r *Room) firstScreenVideoReady(p *peer, session *ScreenShareSession) {
 	session.mu.Unlock()
 
 	r.mu.Lock()
-	others := make([]*peer, 0, len(r.peers))
-	for _, op := range r.peers {
-		if op.id != p.id {
-			others = append(others, op)
-		}
-	}
+	others := r.othersLocked(p.id)
 	// peerInfo reads p.displayName / p.selfMuted / etc — fields guarded by
 	// r.mu. Snapshot here, not after Unlock.
 	info := peerInfo(p)
@@ -576,12 +583,7 @@ func (r *Room) handleScreenShareModeChange(p *peer, data protocol.ScreenShareMod
 	session.requestKeyframe()
 
 	r.mu.Lock()
-	others := make([]*peer, 0, len(r.peers))
-	for _, op := range r.peers {
-		if op.id != p.id {
-			others = append(others, op)
-		}
-	}
+	others := r.othersLocked(p.id)
 	r.mu.Unlock()
 
 	payload, _ := json.Marshal(protocol.ScreenShareModeChangedData{
@@ -607,7 +609,7 @@ func (r *Room) handleScreenShareUnsubscribe(sub *peer, data protocol.ScreenShare
 // OnConnectionStateChange callback.
 func (r *Room) removeScreenSubscriber(sub *peer, publisherID, reason string) {
 	r.mu.Lock()
-	var subPC *screenSubPC
+	var subPC *webrtc.PeerConnection
 	if sub.screenSubs != nil {
 		subPC = sub.screenSubs[publisherID]
 		delete(sub.screenSubs, publisherID)
@@ -622,7 +624,7 @@ func (r *Room) removeScreenSubscriber(sub *peer, publisherID, reason string) {
 	r.mu.Unlock()
 
 	if subPC != nil {
-		_ = subPC.pc.Close()
+		_ = subPC.Close()
 	}
 	wentIdle := false
 	if session != nil {
@@ -791,10 +793,4 @@ func (r *Room) sendScreenShareError(p *peer, publisherID string, reason protocol
 	payload := protocol.ScreenShareErrorData{PublisherID: publisherID, Reason: reason}
 	data, _ := json.Marshal(payload)
 	_ = p.write(protocol.Envelope{Event: "screen-share-error", Data: data})
-}
-
-// screenSubPC is the per-publisher subscriber-side bookkeeping a subscriber
-// peer keeps; the publisher ID lives in the screenSubs map key.
-type screenSubPC struct {
-	pc *webrtc.PeerConnection
 }

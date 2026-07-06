@@ -3,10 +3,11 @@ import { selectChatOnlyParticipants, selectVoiceParticipants, useStore } from '.
 import { ParticipantRow } from './ParticipantRow';
 import { useRoomPeers } from '../hooks/useRoomPeers';
 import { ROOM_SLUGS, ROOM_LABELS, type RoomSlug } from '../rooms';
+import type { ParticipantUI } from '../types';
 
 interface Props {
   onRemoteGainChange: () => void;
-  onPingUser?: (targetId: string) => void;
+  onPingUser: (targetId: string) => void;
   onRoomSelect: (slug: RoomSlug) => void;
 }
 
@@ -23,6 +24,15 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
   const isJoined = joinState === 'joined';
 
   const tileOn = 'bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
+
+  const renderRow = (p: ParticipantUI) => (
+    <ParticipantRow
+      key={p.id}
+      participant={p}
+      onRemoteGainChange={onRemoteGainChange}
+      onPing={onPingUser}
+    />
+  );
 
   return (
     <section className="card flex flex-col p-6 flex-1 min-h-0 overflow-y-auto gap-5">
@@ -117,14 +127,7 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
               Пока никого нет
             </div>
           )}
-          {participants.map((p) => (
-            <ParticipantRow
-              key={p.id}
-              participant={p}
-              onRemoteGainChange={onRemoteGainChange}
-              onPing={onPingUser}
-            />
-          ))}
+          {participants.map(renderRow)}
         </div>
       </div>
 
@@ -136,16 +139,7 @@ export function ParticipantsCard({ onRemoteGainChange, onPingUser, onRoomSelect 
               {lurkers.length}
             </span>
           </div>
-          <div className="grid gap-2">
-            {lurkers.map((p) => (
-              <ParticipantRow
-                key={p.id}
-                participant={p}
-                onRemoteGainChange={onRemoteGainChange}
-                onPing={onPingUser}
-              />
-            ))}
-          </div>
+          <div className="grid gap-2">{lurkers.map(renderRow)}</div>
         </div>
       )}
     </section>

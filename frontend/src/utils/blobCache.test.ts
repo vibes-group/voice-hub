@@ -28,17 +28,16 @@ describe('blobCache', () => {
     expect(await got!.text()).toBe('hello');
   });
 
-  it('reports has() true after put and false on miss', async () => {
+  it('get() returns the blob after put and null on miss', async () => {
     await cache.putBlob('present', new Blob(['x']));
-    expect(await cache.hasBlob('present')).toBe(true);
-    expect(await cache.hasBlob('absent')).toBe(false);
+    expect(await cache.getBlob('present')).not.toBeNull();
     expect(await cache.getBlob('absent')).toBeNull();
   });
 
   it('rekeys a blob from a temp id to the real id', async () => {
     await cache.putBlob('temp:1', new Blob(['bytes']));
     await cache.rekeyBlob('temp:1', 'real-1');
-    expect(await cache.hasBlob('temp:1')).toBe(false);
+    expect(await cache.getBlob('temp:1')).toBeNull();
     expect(await (await cache.getBlob('real-1'))!.text()).toBe('bytes');
   });
 
@@ -52,8 +51,8 @@ describe('blobCache', () => {
     const evicted = await cache.pruneBlobs(250);
 
     expect(evicted).toEqual(['o1']);
-    expect(await cache.hasBlob('o1')).toBe(false);
-    expect(await cache.hasBlob('o2')).toBe(true);
-    expect(await cache.hasBlob('o3')).toBe(true);
+    expect(await cache.getBlob('o1')).toBeNull();
+    expect(await cache.getBlob('o2')).not.toBeNull();
+    expect(await cache.getBlob('o3')).not.toBeNull();
   });
 });

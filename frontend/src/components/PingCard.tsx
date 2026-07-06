@@ -1,6 +1,6 @@
 import { useStore } from '../store/useStore';
 import { isTauri } from '../utils/tauri';
-import { Toggle } from './Toggle';
+import { ToggleRow } from './Toggle';
 
 export function PingCard() {
   const pingSoundEnabled = useStore((s) => s.pingSoundEnabled);
@@ -32,35 +32,29 @@ export function PingCard() {
       </div>
 
       <div className="grid gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="section-label">Показывать пинги</span>
-          <Toggle
-            checked={pingsVisible}
-            onChange={() => setMuteIncomingPings(!muteIncomingPings)}
-            ariaLabel="Показывать пинги"
-          />
-        </div>
+        <ToggleRow
+          label="Показывать пинги"
+          checked={pingsVisible}
+          onChange={() => setMuteIncomingPings(!muteIncomingPings)}
+          ariaLabel="Показывать пинги"
+        />
 
         {pingsVisible && (
           <div className="grid gap-3 border-l border-line pl-4 ml-1">
-            <div className="flex items-center justify-between gap-3">
-              <span className="section-label">Звук</span>
-              <Toggle
-                checked={pingSoundEnabled}
-                onChange={() => setPingSoundEnabled(!pingSoundEnabled)}
-                ariaLabel="Звук пинга"
-              />
-            </div>
+            <ToggleRow
+              label="Звук"
+              checked={pingSoundEnabled}
+              onChange={() => setPingSoundEnabled(!pingSoundEnabled)}
+              ariaLabel="Звук пинга"
+            />
 
             {isTauri() && (
-              <div className="flex items-center justify-between gap-3">
-                <span className="section-label">Мигание окна</span>
-                <Toggle
-                  checked={pingWindowFlashEnabled}
-                  onChange={() => setPingWindowFlashEnabled(!pingWindowFlashEnabled)}
-                  ariaLabel="Мигание окна"
-                />
-              </div>
+              <ToggleRow
+                label="Мигание окна"
+                checked={pingWindowFlashEnabled}
+                onChange={() => setPingWindowFlashEnabled(!pingWindowFlashEnabled)}
+                ariaLabel="Мигание окна"
+              />
             )}
           </div>
         )}
