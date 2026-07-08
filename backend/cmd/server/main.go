@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -34,6 +35,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	// Go's default MIME table lacks .webmanifest; the PWA manifest must be
+	// served as application/manifest+json for browsers to honour it.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 
 	allowInsecure, _ := strconv.ParseBool(os.Getenv("APP_ALLOW_INSECURE"))
 	if err := config.ValidateInsecureConfig(&cfg, allowInsecure); err != nil {

@@ -67,7 +67,8 @@ func RateLimitAPI(l *ratelimit.Limiter, trusted []netip.Prefix, next http.Handle
 }
 
 // RequireAuthHTML gates HTML routes behind a valid session. Public assets
-// (login page, favicons, Vite bundles) pass through without a cookie.
+// (login page, favicons, PWA manifest/service worker, Vite bundles) pass
+// through without a cookie.
 // Unauthenticated requests to gated paths are redirected to /login.html.
 // User sessions whose ConnPass generation has drifted are also rejected.
 func RequireAuthHTML(secret []byte, connPass *auth.ConnPassStore, adminVer string, next http.Handler) http.Handler {
@@ -79,7 +80,8 @@ func RequireAuthHTML(secret []byte, connPass *auth.ConnPassStore, adminVer strin
 		}
 		switch r.URL.Path {
 		case "/login.html", "/login.js",
-			"/favicon.ico", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png":
+			"/favicon.ico", "/favicon.svg", "/favicon.png", "/apple-touch-icon.png",
+			"/manifest.webmanifest", "/sw.js":
 			next.ServeHTTP(w, r)
 			return
 		}
