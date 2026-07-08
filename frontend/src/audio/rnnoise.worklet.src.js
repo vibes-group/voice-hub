@@ -16,6 +16,12 @@ const RING_CAPACITY = 1920;
 const Q15 = 32768;
 const INV_Q15 = 1 / 32768;
 
+// RNNoise decides speech-vs-noise partly on absolute level, so it
+// over-suppresses quiet speech and fricatives, sometimes to silence. Mix a
+// fixed fraction of the dry signal back so output can never fully collapse.
+// 0 = pure denoise. Tradeoff: ~DRY_MIX of the noise floor leaks in pauses.
+const DRY_MIX = 0.15;
+
 class RnnoiseProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -94,7 +100,10 @@ class RnnoiseProcessor extends AudioWorkletProcessor {
       const slot = this.denoisedUpTo;
       for (let i = 0; i < FRAME; i++) frame[i] = inBuf[slot + i] * Q15;
       this.state.processFrame(frame);
-      for (let i = 0; i < FRAME; i++) outBuf[slot + i] = frame[i] * INV_Q15;
+      // inBuf still holds the untouched dry samples (frame is a separate copy).
+      for (let i = 0; i < FRAME; i++) {
+        outBuf[slot + i] = (1 - DRY_MIX) * frame[i] * INV_Q15 + DRY_MIX * inBuf[slot + i];
+      }
       this.denoisedUpTo = (slot + FRAME) % RING_CAPACITY;
       this.buffered -= FRAME;
       this.pending += FRAME;

@@ -7,7 +7,7 @@ import { createWorkletDenoiser } from '../worklet-denoiser';
 // Caddy serves /vendor/* immutable, so bump this when the bundled worklet
 // content changes (processor name, ring sizing, ABI). Stale cached copies
 // register the wrong processor name and silently time out on init.
-const WORKLET_VERSION = '3';
+const WORKLET_VERSION = '4';
 const WORKLET_URL = `/vendor/rnnoise/worklet.js?v=${WORKLET_VERSION}`;
 
 export const rnnoise = createWorkletDenoiser({
