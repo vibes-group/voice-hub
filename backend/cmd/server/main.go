@@ -264,6 +264,14 @@ func wireRoutes(
 		htmlRoutes.ServeHTTP(w, req)
 	}))
 	mux.HandleFunc("GET /healthz", handler.Health())
+	mux.HandleFunc("GET /internal/call-status", handler.CallStatus(func() bool {
+		for _, room := range rooms {
+			if len(room.Peers()) > 0 {
+				return true
+			}
+		}
+		return false
+	}))
 	mux.HandleFunc("GET /api/version", handler.Version(version))
 	mux.HandleFunc("POST /api/login", handler.Login(handler.LoginConfig{
 		AdminPassword: cfg.AdminPassword,

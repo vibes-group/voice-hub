@@ -81,6 +81,17 @@ func Health() http.HandlerFunc {
 	}
 }
 
+func CallStatus(active func() bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if active() {
+			_, _ = w.Write([]byte("active\n"))
+			return
+		}
+		_, _ = w.Write([]byte("idle\n"))
+	}
+}
+
 func Version(version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
