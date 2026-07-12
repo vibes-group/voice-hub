@@ -121,6 +121,10 @@ type ScreenShareSession struct {
 
 	mu          sync.RWMutex
 	subscribers map[string]*screenSubscriber // key = subscriber peer ID
+	// subscriberView is an immutable copy-on-write view for RTP and RTCP hot
+	// paths. Writers rebuild it under mu; readers avoid a lock and allocation
+	// for every packet/poll.
+	subscriberView atomic.Pointer[[]*screenSubscriber]
 
 	// graceCancel cancels the in-flight grace timer when the publisher
 	// reattaches via screen-share-resume. Replaced atomically each time a
@@ -241,16 +245,21 @@ func (s *ScreenShareSession) Mode() protocol.ScreenShareMode {
 	return decodeMode(s.mode.Load())
 }
 
-// subscribersSnapshot returns the current subscribers under RLock so callers
-// can iterate without holding s.mu.
-func (s *ScreenShareSession) subscribersSnapshot() []*screenSubscriber {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// Caller must hold s.mu for writing.
+func (s *ScreenShareSession) refreshSubscriberViewLocked() {
 	subs := make([]*screenSubscriber, 0, len(s.subscribers))
 	for _, sub := range s.subscribers {
 		subs = append(subs, sub)
 	}
-	return subs
+	s.subscriberView.Store(&subs)
+}
+
+func (s *ScreenShareSession) subscribersSnapshot() []*screenSubscriber {
+	view := s.subscriberView.Load()
+	if view == nil {
+		return nil
+	}
+	return *view
 }
 
 // setupScreenPubPC creates the publisher PC, performs the SDP exchange, and
@@ -631,6 +640,7 @@ func (r *Room) removeScreenSubscriber(sub *peer, publisherID, reason string) {
 		session.mu.Lock()
 		if _, ok := session.subscribers[sub.id]; ok {
 			delete(session.subscribers, sub.id)
+			session.refreshSubscriberViewLocked()
 			wentIdle = len(session.subscribers) == 0
 		}
 		session.mu.Unlock()
@@ -670,6 +680,7 @@ func (r *Room) endScreenShareSession(session *ScreenShareSession, reason string)
 		subs = append(subs, s)
 	}
 	session.subscribers = nil
+	session.refreshSubscriberViewLocked()
 	graceCancel := session.graceCancel
 	session.graceCancel = nil
 	session.mu.Unlock()

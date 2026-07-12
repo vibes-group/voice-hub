@@ -130,6 +130,7 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 	defer syncBufsPool.Put(bufs)
 	want := bufs.want
 	have := bufs.have
+	changed := false
 	clear(want)
 	clear(have)
 
@@ -153,6 +154,7 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 				log.Printf("sfu: syncOnePeer (%s) RemoveTrack: %v", p.id, err)
 				return true
 			}
+			changed = true
 		}
 	}
 
@@ -176,6 +178,10 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 			log.Printf("sfu: syncOnePeer (%s) AddTrack: %v", p.id, err)
 			return true
 		}
+		changed = true
+	}
+	if p.syncInitialized && !changed {
+		return false
 	}
 
 	offer, err := p.pc.CreateOffer(nil)
@@ -201,5 +207,6 @@ func (r *Room) syncOnePeer(p *peer, tracks map[string]*webrtc.TrackLocalStaticRT
 		}
 		return true
 	}
+	p.syncInitialized = true
 	return false
 }

@@ -26,6 +26,8 @@ export function createSpeakingLoop(): SpeakingLoop {
   let timerId: number | null = null;
 
   const tick = (): void => {
+    // Speaking indicators are invisible in background tabs; skip expensive analyser reads.
+    if (document.visibilityState === 'hidden') return;
     const now = performance.now();
     for (const t of targets.values()) {
       const muted = t.getMuted?.() ?? false;

@@ -44,3 +44,26 @@ func BenchmarkOnTrackExtensionStrip_Retain(b *testing.B) {
 		pkt.Extensions = pkt.Extensions[:0]
 	}
 }
+
+func TestOnTrackExtensionStripRetainsExtensionBuffer(t *testing.T) {
+	buf := audioRTPWithExtensions()
+	pkt := &rtp.Packet{}
+	if err := pkt.Unmarshal(buf); err != nil {
+		t.Fatal(err)
+	}
+	if cap(pkt.Extensions) == 0 {
+		t.Fatal("test packet did not produce an extension buffer")
+	}
+
+	pkt.Extension = false
+	pkt.Extensions = pkt.Extensions[:0]
+	if got := cap(pkt.Extensions); got == 0 {
+		t.Fatal("stripping extensions discarded reusable buffer")
+	}
+	if err := pkt.Unmarshal(buf); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(pkt.Extensions); got != 2 {
+		t.Fatalf("decoded extensions = %d, want 2", got)
+	}
+}

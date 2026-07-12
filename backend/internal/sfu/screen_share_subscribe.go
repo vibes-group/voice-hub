@@ -121,6 +121,7 @@ func (r *Room) finishScreenSubSetup(
 		return
 	}
 	session.subscribers[sub.id] = subEntry
+	session.refreshSubscriberViewLocked()
 	firstSubscriber := len(session.subscribers) == 1
 	session.mu.Unlock()
 

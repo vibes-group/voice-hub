@@ -104,6 +104,9 @@ type peer struct {
 
 	// syncMu serialises syncOnePeer for this peer; caller must not hold r.mu.
 	syncMu sync.Mutex
+	// syncInitialized records that this PC has received its initial offer.
+	// Guarded by syncMu.
+	syncInitialized bool
 	// syncPending is set when syncOnePeer was skipped because the PC was
 	// mid-negotiation; the answer handler drains it once signaling settles.
 	syncPending atomic.Bool
@@ -387,7 +390,10 @@ func (r *Room) ServeWS(w http.ResponseWriter, req *http.Request) {
 			// that subscribers did not, so forwarding them would cause subscribers
 			// to misparse the extension block.
 			pkt.Extension = false
-			pkt.Extensions = nil
+			// Retain the decoder-owned backing array for the next Unmarshal.
+			// Setting this to nil forces two allocations for every packet that
+			// carries RTP header extensions.
+			pkt.Extensions = pkt.Extensions[:0]
 
 			if err := local.WriteRTP(pkt); err != nil {
 				return

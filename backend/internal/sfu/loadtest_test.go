@@ -159,7 +159,10 @@ func dialClient(t testing.TB, url, displayName, clientID string, api *webrtc.API
 		if ice == nil {
 			return
 		}
-		b, err := json.Marshal(ice.ToJSON())
+		b, err := json.Marshal(protocol.CandidateEnvelope{
+			PC:               protocol.PCAudio,
+			ICECandidateInit: ice.ToJSON(),
+		})
 		if err != nil {
 			return
 		}
@@ -222,11 +225,14 @@ func (c *loadClient) readLoop() {
 		switch env.Event {
 		case "offer":
 			c.offersRecv.Add(1)
-			var sd webrtc.SessionDescription
-			if err := json.Unmarshal(env.Data, &sd); err != nil {
+			var offer protocol.OfferEnvelope
+			if err := json.Unmarshal(env.Data, &offer); err != nil {
 				continue
 			}
-			if err := c.pc.SetRemoteDescription(sd); err != nil {
+			if offer.PC != protocol.PCAudio {
+				continue
+			}
+			if err := c.pc.SetRemoteDescription(offer.SessionDescription); err != nil {
 				continue
 			}
 			answer, err := c.pc.CreateAnswer(nil)
@@ -243,14 +249,20 @@ func (c *loadClient) readLoop() {
 					return
 				}
 			}
-			ans, _ := json.Marshal(answer)
+			ans, _ := json.Marshal(protocol.AnswerEnvelope{
+				PC:                 protocol.PCAudio,
+				SessionDescription: answer,
+			})
 			_ = c.write(protocol.Envelope{Event: "answer", Data: ans})
 		case "candidate":
-			var ic webrtc.ICECandidateInit
-			if err := json.Unmarshal(env.Data, &ic); err != nil {
+			var candidate protocol.CandidateEnvelope
+			if err := json.Unmarshal(env.Data, &candidate); err != nil {
 				continue
 			}
-			_ = c.pc.AddICECandidate(ic)
+			if candidate.PC != protocol.PCAudio {
+				continue
+			}
+			_ = c.pc.AddICECandidate(candidate.ICECandidateInit)
 		}
 	}
 }
@@ -333,11 +345,13 @@ func TestLoadJoinStorm(t *testing.T) {
 	settleDur := time.Since(start)
 
 	var totalRecv int64
+	var totalOffers int64
 	for _, c := range clients {
 		totalRecv += c.recvCount.Load()
+		totalOffers += c.offersRecv.Load()
 	}
-	t.Logf("join-storm n=%d dial=%v settled=%v recv=%d goroutines=%d",
-		n, dialDur, settleDur, totalRecv, runtime.NumGoroutine())
+	t.Logf("join-storm n=%d dial=%v settled=%v recv=%d offers=%d goroutines=%d",
+		n, dialDur, settleDur, totalRecv, totalOffers, runtime.NumGoroutine())
 
 	for _, c := range clients {
 		c.close()
@@ -491,13 +505,21 @@ func TestLoadRTPFanout(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	var totalRecv int64
+	var totalOffers int64
 	for _, c := range clients {
 		totalRecv += c.rtpRecv.Load()
+		totalOffers += c.offersRecv.Load()
 	}
 	expected := int64(n) * int64(n-1) * int64(pktsPerSec) * int64(publishDur/time.Second)
 	dropPct := 100.0 * float64(expected-totalRecv) / float64(expected)
-	t.Logf("rtp-fanout n=%d publish=%v elapsed=%v rtpRecv=%d expected≈%d drop=%.1f%% goroutines=%d",
-		n, publishDur, pubElapsed, totalRecv, expected, dropPct, runtime.NumGoroutine())
+	t.Logf("rtp-fanout n=%d publish=%v elapsed=%v rtpRecv=%d expected≈%d drop=%.1f%% offers=%d goroutines=%d",
+		n, publishDur, pubElapsed, totalRecv, expected, dropPct, totalOffers, runtime.NumGoroutine())
+	if totalRecv < expected*8/10 {
+		t.Fatalf("RTP delivery too low: received=%d expected≈%d (%.1f%% drop)", totalRecv, expected, dropPct)
+	}
+	if totalOffers > int64(n*n*2) {
+		t.Fatalf("SDP offer storm: offers=%d limit=%d", totalOffers, n*n*2)
+	}
 
 	for _, c := range clients {
 		c.close()

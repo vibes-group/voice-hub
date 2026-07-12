@@ -49,6 +49,16 @@ type fakeRoom struct {
 	peers []protocol.PeerInfo
 }
 
+type countingRoom struct {
+	peers []protocol.PeerInfo
+	calls int
+}
+
+func (f *countingRoom) Peers() []protocol.PeerInfo {
+	f.calls++
+	return f.peers
+}
+
 func (f *fakeRoom) Peers() []protocol.PeerInfo {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -354,6 +364,58 @@ func TestSlowSubscriberGetsSnapshotResync(t *testing.T) {
 	peers := snap.Rooms["room1"].Peers
 	if len(peers) != 1 || peers[0].ID != "final" {
 		t.Fatalf("snapshot peers = %+v", peers)
+	}
+}
+
+func TestOverflowBuildsOneSnapshotForAllSlowSubscribers(t *testing.T) {
+	room := &countingRoom{peers: []protocol.PeerInfo{{ID: "final"}}}
+	h := New(func() map[string]RoomLister {
+		return map[string]RoomLister{"room1": room}
+	})
+
+	for range 3 {
+		sub := &subscriber{out: make(chan []byte, outBufLen)}
+		for range outBufLen {
+			sub.out <- []byte("stale")
+		}
+		h.subs[sub] = struct{}{}
+	}
+	h.fanout([]byte("delta"))
+
+	if room.calls != 1 {
+		t.Fatalf("room Peers calls = %d, want one shared snapshot", room.calls)
+	}
+	for sub := range h.subs {
+		if len(sub.out) != 1 {
+			t.Fatalf("queued messages = %d, want 1 snapshot", len(sub.out))
+		}
+	}
+}
+
+func BenchmarkOverflowResyncFanout(b *testing.B) {
+	for _, numSubs := range []int{1, 16, 64} {
+		b.Run(fmt.Sprintf("subscribers=%d", numSubs), func(b *testing.B) {
+			room := &countingRoom{peers: make([]protocol.PeerInfo, 32)}
+			h := New(func() map[string]RoomLister {
+				return map[string]RoomLister{"room1": room}
+			})
+			for range numSubs {
+				sub := &subscriber{out: make(chan []byte, outBufLen)}
+				for range outBufLen {
+					sub.out <- []byte("stale")
+				}
+				h.subs[sub] = struct{}{}
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				h.fanout([]byte("delta"))
+				for sub := range h.subs {
+					for len(sub.out) < outBufLen {
+						sub.out <- []byte("stale")
+					}
+				}
+			}
+		})
 	}
 }
 

@@ -105,26 +105,30 @@ func (h *Hub) fanout(frame []byte) {
 
 	// Single writer per sub.out (this goroutine), so the drain-then-push
 	// resync pattern is race-free.
+	var snapshot []byte
+	var snapshotErr error
 	for _, sub := range subs {
 		select {
 		case sub.out <- frame:
 		default:
-			h.queueResync(sub)
+			if snapshot == nil && snapshotErr == nil {
+				snapshot, snapshotErr = h.buildSnapshot()
+			}
+			if snapshotErr != nil {
+				slog.Error("presence: resync snapshot", "err", snapshotErr)
+				continue
+			}
+			h.queueResync(sub, snapshot)
 		}
 	}
 }
 
-func (h *Hub) queueResync(sub *subscriber) {
-	snap, err := h.buildSnapshot()
-	if err != nil {
-		slog.Error("presence: resync snapshot", "err", err)
-		return
-	}
+func (h *Hub) queueResync(sub *subscriber, snapshot []byte) {
 	for {
 		select {
 		case <-sub.out:
 		default:
-			sub.out <- snap
+			sub.out <- snapshot
 			return
 		}
 	}
@@ -205,4 +209,3 @@ func (h *Hub) buildSnapshot() ([]byte, error) {
 	}
 	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", protocol.PresenceSnapshotEvent, data), nil
 }
-

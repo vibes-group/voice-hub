@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -67,6 +68,49 @@ func waitFor(t *testing.T, p *peer, event string, timeout time.Duration) (protoc
 		case <-deadline.C:
 			return protocol.Envelope{}, false
 		}
+	}
+}
+
+func BenchmarkScreenSubscriberSnapshot(b *testing.B) {
+	for _, count := range []int{1, 8, 32} {
+		b.Run(fmt.Sprintf("subscribers=%d", count), func(b *testing.B) {
+			session := &ScreenShareSession{subscribers: make(map[string]*screenSubscriber, count)}
+			for i := range count {
+				id := fmt.Sprintf("sub-%d", i)
+				session.subscribers[id] = &screenSubscriber{peerID: id}
+			}
+			session.refreshSubscriberViewLocked()
+			b.ReportAllocs()
+			for b.Loop() {
+				if got := len(session.subscribersSnapshot()); got != count {
+					b.Fatalf("snapshot size = %d, want %d", got, count)
+				}
+			}
+		})
+	}
+}
+
+func TestScreenSubscriberSnapshotTracksMutations(t *testing.T) {
+	session := &ScreenShareSession{subscribers: make(map[string]*screenSubscriber)}
+	a := &screenSubscriber{peerID: "a"}
+	b := &screenSubscriber{peerID: "b"}
+
+	session.mu.Lock()
+	session.subscribers[a.peerID] = a
+	session.subscribers[b.peerID] = b
+	session.refreshSubscriberViewLocked()
+	session.mu.Unlock()
+	if got := len(session.subscribersSnapshot()); got != 2 {
+		t.Fatalf("snapshot after add = %d, want 2", got)
+	}
+
+	session.mu.Lock()
+	delete(session.subscribers, a.peerID)
+	session.refreshSubscriberViewLocked()
+	session.mu.Unlock()
+	got := session.subscribersSnapshot()
+	if len(got) != 1 || got[0] != b {
+		t.Fatalf("snapshot after remove = %#v, want only b", got)
 	}
 }
 
