@@ -30,6 +30,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Internal endpoints get their own listener so the public :8080 surface can
+// never serve /internal/* — private by construction, no Caddy rule to forget.
+// Bound on all interfaces (not localhost) so sibling containers can reach it.
+const internalAddr = ":8081"
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -148,6 +153,26 @@ func main() {
 		}
 	}()
 
+	internalMux := http.NewServeMux()
+	internalMux.HandleFunc("GET /internal/call-status", handler.CallStatus(func() bool {
+		for _, room := range rooms {
+			if len(room.Peers()) > 0 {
+				return true
+			}
+		}
+		return false
+	}))
+	internalServer := &http.Server{
+		Addr:              internalAddr,
+		Handler:           internalMux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		if err := internalServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			srvErr <- err
+		}
+	}()
+
 	// pprof off by default: heap dumps expose in-memory secrets (session secret, TURN secret, admin password).
 	if v, _ := strconv.ParseBool(os.Getenv("APP_PPROF")); v {
 		go func() {
@@ -177,6 +202,9 @@ func main() {
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: http: %v", err)
+	}
+	if err := internalServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: internal http: %v", err)
 	}
 	for _, rm := range rooms {
 		rm.Close()
@@ -264,14 +292,6 @@ func wireRoutes(
 		htmlRoutes.ServeHTTP(w, req)
 	}))
 	mux.HandleFunc("GET /healthz", handler.Health())
-	mux.HandleFunc("GET /internal/call-status", handler.CallStatus(func() bool {
-		for _, room := range rooms {
-			if len(room.Peers()) > 0 {
-				return true
-			}
-		}
-		return false
-	}))
 	mux.HandleFunc("GET /api/version", handler.Version(version))
 	mux.HandleFunc("POST /api/login", handler.Login(handler.LoginConfig{
 		AdminPassword: cfg.AdminPassword,
