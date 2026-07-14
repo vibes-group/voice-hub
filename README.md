@@ -8,38 +8,38 @@
 [![Release Desktop](https://github.com/vibes-group/voice-hub/actions/workflows/release-desktop.yml/badge.svg)](https://github.com/vibes-group/voice-hub/actions/workflows/release-desktop.yml)
 [![License](https://img.shields.io/github/license/vibes-group/voice-hub)](LICENSE)
 
-Self-hosted голосовая комната.
+Постоянная голосовая комната для своей компании. Self-hosted: один сервер со встроенным TURN, без внешних сервисов.
 
-## Скачать (Windows)
+## Возможности
 
-⬇ **[Последний релиз](https://github.com/vibes-group/voice-hub/releases/latest)**
+- **Голос** с шумоподавлением.
+- **Демонстрация экрана.**
+- **Чат** с вложениями.
+- **Desktop-клиент для Windows** — глобальные хоткеи, автообновление.
+- **Вход по паролю** — без аккаунтов и регистрации.
 
-## Локальная разработка
+## Скачать
+
+⬇ **[Последний релиз для Windows](https://github.com/vibes-group/voice-hub/releases/latest)**
+
+Сборка универсальная: адрес сервера вводится при первом запуске.
+
+## Разработка
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
-Открыть `http://localhost:8080`, зайти паролем `dev`.
+Приложение доступно на `http://localhost:8080`, пароль `dev`.
 
-Фронт с HMR отдельно:
+Фронтенд с HMR — отдельно от контейнера:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d app --build
 cd frontend && npm install && npm run dev
 ```
 
-## Production
-
-Сервер + GitHub Actions + Caddy. Push в master → деплой. Детали — [DEPLOY.md](DEPLOY.md).
-
-## Desktop (Tauri)
-
-Tauri 2 обёртка в `src-tauri/`. Generic бинарь — сервер вводится при первом запуске.
-
-Релиз: push в `src-tauri/**` автоматически тегается и публикуется в GitHub Releases. Подробнее — [UPDATER.md](UPDATER.md).
-
-Локальная сборка:
+Desktop-клиент (`src-tauri/`) локально:
 
 ```bash
 cd src-tauri
@@ -47,3 +47,6 @@ cargo install tauri-cli --version '^2'
 cargo tauri dev
 ```
 
+## Лицензия
+
+[MIT](LICENSE)
