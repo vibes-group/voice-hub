@@ -1,6 +1,6 @@
 [package]
 name = "voice-hub-desktop"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 description = "Desktop shell for Voice Hub built with Tauri"
 
