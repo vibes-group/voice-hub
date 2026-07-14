@@ -96,12 +96,6 @@ fn server_endpoint(host: &str) -> Result<Url, String> {
     Ok(endpoint)
 }
 
-fn selected_server_endpoint() -> Result<Option<Url>, String> {
-    connection::load_host()
-        .map(|host| server_endpoint(&host))
-        .transpose()
-}
-
 async fn check_endpoint(
     app: &AppHandle,
     endpoint: Url,
@@ -118,10 +112,10 @@ async fn check_endpoint(
 }
 
 async fn discover_update(app: &AppHandle) -> Result<Option<Update>, String> {
-    let Some(endpoint) = selected_server_endpoint()? else {
+    let Some(host) = connection::load_host() else {
         return Ok(None);
     };
-    check_endpoint(app, endpoint, SERVER_TIMEOUT).await
+    check_endpoint(app, server_endpoint(&host)?, SERVER_TIMEOUT).await
 }
 
 /// Check for an update; `force` skips the focus throttle.
