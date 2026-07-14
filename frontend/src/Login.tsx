@@ -66,11 +66,7 @@ export function Login() {
           <ArrowLeftRight size={18} />
         </button>
       )}
-      {!isTauri() && (
-        <div className="fixed top-4 right-4 z-10">
-          <DesktopDownloadButton />
-        </div>
-      )}
+      <DesktopDownloadButton className="fixed top-4 right-4 z-10" />
       <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
         <div className="flex items-center gap-2.5 mb-6">
           <img src="/favicon.svg" alt="" width={22} height={22} className="block" />

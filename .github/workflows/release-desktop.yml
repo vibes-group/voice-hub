@@ -120,6 +120,7 @@ jobs:
 
   mirror-to-server:
     needs: build-windows
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -145,8 +146,7 @@ jobs:
           mkdir mirror
           gh release download "$TAG" --repo "$REPO" --dir mirror \
             --pattern 'latest.json' \
-            --pattern '*.exe' \
-            --pattern '*.sig'
+            --pattern '*.exe'
 
           installer=$(jq -r '.platforms["windows-x86_64"].url | split("/")[-1]' mirror/latest.json)
           test -n "$installer"
@@ -170,4 +170,10 @@ jobs:
               cp "$stage/latest.json" /updates/.latest.json.tmp
               chmod 0644 /updates/.latest.json.tmp
               mv /updates/.latest.json.tmp /updates/latest.json
+              for existing in /updates/*; do
+                name=$(basename "$existing")
+                [ "$name" = latest.json ] && continue
+                [ -f "$stage/$name" ] && continue
+                rm -f "$existing"
+              done
             '\'''
