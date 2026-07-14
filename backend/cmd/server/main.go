@@ -286,6 +286,9 @@ func wireRoutes(
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /desktop/latest.json", handler.DesktopUpdateManifest(cfg.UpdatesDir))
+	mux.HandleFunc("GET /desktop/download/windows", handler.DesktopDownloadWindows(cfg.UpdatesDir))
+	mux.HandleFunc("GET /desktop/files/{name}", handler.DesktopUpdateFile(cfg.UpdatesDir))
 	htmlRoutes := middleware.RequireAuthHTML(cfg.SessionSecret, connPass, adminVer, http.FileServer(http.Dir(cfg.WebDir)))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Permissions-Policy", "geolocation=(), payment=()")

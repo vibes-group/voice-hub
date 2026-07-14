@@ -41,6 +41,7 @@ RUN mkdir -p /app/data && chown app:app /app/data
 
 ENV APP_ADDR=:8080
 ENV APP_WEB_DIR=/app/web
+ENV APP_UPDATES_DIR=/app/updates
 
 EXPOSE 8080
 

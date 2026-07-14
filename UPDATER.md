@@ -2,6 +2,10 @@
 
 Tauri shell обновляется через `tauri-plugin-updater`.
 
+Клиент сначала проверяет `/desktop/latest.json` на выбранном сервере. При
+сетевой ошибке или ошибке скачивания используется GitHub Releases. Workflow
+релиза зеркалирует подписанные артефакты в Docker volume на deploy-сервере.
+
 ## Bootstrap (один раз)
 
 ```bash
