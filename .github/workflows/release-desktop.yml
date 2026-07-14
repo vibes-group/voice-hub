@@ -17,6 +17,8 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     permissions:
       contents: write
     steps:
@@ -115,3 +117,57 @@ jobs:
           prerelease: false
           args: --target ${{ env.DESKTOP_TARGET }}
           updaterJsonPreferNsis: true
+
+  mirror-to-server:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: vibes-group/infra
+          ref: master
+
+      - uses: ./.github/actions/setup-ssh
+        with:
+          deploy-ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          host-key: ${{ secrets.DEPLOY_HOST_KEY }}
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir mirror
+          gh release download "$TAG" --repo "$REPO" --dir mirror \
+            --pattern 'latest.json' \
+            --pattern '*.exe' \
+            --pattern '*.sig'
+
+          installer=$(jq -r '.platforms["windows-x86_64"].url | split("/")[-1]' mirror/latest.json)
+          test -n "$installer"
+          test -f "mirror/$installer"
+
+      - name: Publish server mirror
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          tar -C mirror -czf - . | ssh "deploy@$DEPLOY_HOST" \
+            'docker run --rm -i -v voice-hub-updates:/updates busybox:1.37 sh -eu -c '\''
+              stage=$(mktemp -d)
+              trap "rm -rf $stage" EXIT
+              tar -xzf - -C "$stage"
+              for file in "$stage"/*; do
+                [ "$(basename "$file")" = latest.json ] && continue
+                cp "$file" /updates/
+                chmod 0644 "/updates/$(basename "$file")"
+              done
+              cp "$stage/latest.json" /updates/.latest.json.tmp
+              chmod 0644 /updates/.latest.json.tmp
+              mv /updates/.latest.json.tmp /updates/latest.json
+            '\'''

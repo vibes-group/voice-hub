@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Addr          string
 	WebDir        string
+	UpdatesDir    string
 	AppHostname   string
 	PublicIP      string
 	TurnRealm     string
@@ -55,6 +56,7 @@ func Load() (Config, error) {
 	return Config{
 		Addr:           env("APP_ADDR", ":8080"),
 		WebDir:         env("APP_WEB_DIR", "../frontend/dist"),
+		UpdatesDir:     env("APP_UPDATES_DIR", "../updates"),
 		AppHostname:    hostname,
 		PublicIP:       os.Getenv("PUBLIC_IP"),
 		TurnRealm:      hostname,

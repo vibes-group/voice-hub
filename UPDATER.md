@@ -2,6 +2,10 @@
 
 Tauri shell обновляется через `tauri-plugin-updater`.
 
+Клиент проверяет `/desktop/latest.json` только на выбранном сервере. Workflow
+релиза зеркалирует подписанные артефакты из GitHub Releases в Docker volume на
+deploy-сервере. GitHub остаётся доступен только для ручного скачивания.
+
 ## Bootstrap (один раз)
 
 ```bash

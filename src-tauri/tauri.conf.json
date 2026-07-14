@@ -35,9 +35,6 @@
   },
   "plugins": {
     "updater": {
-      "endpoints": [
-        "https://github.com/vibes-group/voice-hub/releases/latest/download/latest.json"
-      ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFENDZGMTZBMjdFNDgyNzYKUldSMmd1UW5hdkZHcldSZDlWM0E3T2h2THZkNXV4M0JrcUJFbzFjT3ZSQWY3cTVkUmFJSVM3ZjIK",
       "windows": {
         "installMode": "passive"

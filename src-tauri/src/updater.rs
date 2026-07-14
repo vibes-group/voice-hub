@@ -8,12 +8,15 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
+use url::Url;
 
+use crate::connection;
 use crate::tray;
 
 const INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_THROTTLE: Duration = Duration::from_secs(15 * 60);
 const PROGRESS_EMIT_THROTTLE: Duration = Duration::from_millis(100);
+const SERVER_TIMEOUT: Duration = Duration::from_secs(8);
 
 // IPC payloads for events emitted to the webview. Mirrored on the TS side
 // in frontend/src/types/ipc.ts — keep field names and optionality in sync.
@@ -85,6 +88,42 @@ pub fn pending_version(app: &AppHandle) -> Option<String> {
     s.pending.as_ref().map(|u| u.version.clone())
 }
 
+fn server_endpoint(host: &str) -> Result<Url, String> {
+    let mut endpoint = connection::normalize_host(host)?;
+    endpoint.set_path("/desktop/latest.json");
+    endpoint.set_query(None);
+    endpoint.set_fragment(None);
+    Ok(endpoint)
+}
+
+fn selected_server_endpoint() -> Result<Option<Url>, String> {
+    connection::load_host()
+        .map(|host| server_endpoint(&host))
+        .transpose()
+}
+
+async fn check_endpoint(
+    app: &AppHandle,
+    endpoint: Url,
+    timeout: Duration,
+) -> Result<Option<Update>, String> {
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| format!("configure endpoint: {e}"))?
+        .timeout(timeout)
+        .build()
+        .map_err(|e| format!("build updater: {e}"))?;
+    updater.check().await.map_err(|e| format!("check: {e}"))
+}
+
+async fn discover_update(app: &AppHandle) -> Result<Option<Update>, String> {
+    let Some(endpoint) = selected_server_endpoint()? else {
+        return Ok(None);
+    };
+    check_endpoint(app, endpoint, SERVER_TIMEOUT).await
+}
+
 /// Check for an update; `force` skips the focus throttle.
 pub async fn check(app: AppHandle, force: bool) {
     let shared: SharedUpdater = match app.try_state::<SharedUpdater>() {
@@ -102,15 +141,7 @@ pub async fn check(app: AppHandle, force: bool) {
         Err(err) => log::error!("updater: state mutex poisoned (last_checked): {err}"),
     }
 
-    let updater = match app.updater() {
-        Ok(u) => u,
-        Err(err) => {
-            log::error!("updater: build failed: {err}");
-            return;
-        }
-    };
-    let result = updater.check().await;
-    let update = match result {
+    let update = match discover_update(&app).await {
         Ok(Some(u)) => u,
         Ok(None) => return,
         Err(err) => {
@@ -183,6 +214,30 @@ where
         .map_err(|e| format!("install: {e}"))
 }
 
+async fn install_with_events(update: Update, app: &AppHandle) -> Result<(), String> {
+    let app_progress = app.clone();
+    let app_installing = app.clone();
+    run_install(
+        update,
+        move |downloaded, total| {
+            if let Err(err) = app_progress.emit(
+                "update-progress",
+                UpdateProgressPayload { downloaded, total },
+            ) {
+                log::warn!("updater: emit update-progress failed: {err}");
+            }
+        },
+        move || {
+            if let Err(err) =
+                app_installing.emit("update-installing", UpdateInstallingPayload {})
+            {
+                log::warn!("updater: emit update-installing failed: {err}");
+            }
+        },
+    )
+    .await
+}
+
 // ---------------------------------------------------------------------------
 // Tauri command adapter
 //
@@ -210,28 +265,7 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
         update
     };
 
-    let app_progress = app.clone();
-    let app_installing = app.clone();
-
-    let result = run_install(
-        update,
-        move |downloaded, total| {
-            if let Err(err) = app_progress.emit(
-                "update-progress",
-                UpdateProgressPayload { downloaded, total },
-            ) {
-                log::warn!("updater: emit update-progress failed: {err}");
-            }
-        },
-        move || {
-            if let Err(err) =
-                app_installing.emit("update-installing", UpdateInstallingPayload {})
-            {
-                log::warn!("updater: emit update-installing failed: {err}");
-            }
-        },
-    )
-    .await;
+    let result = install_with_events(update, &app).await;
 
     if let Err(ref err) = result {
         log::error!("updater: install failed: {err}");
@@ -268,6 +302,16 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn server_endpoint_uses_selected_origin() {
+        let endpoint = server_endpoint("https://voice.example.com:8443/old?x=1")
+            .expect("selected host should produce an endpoint");
+        assert_eq!(
+            endpoint.as_str(),
+            "https://voice.example.com:8443/desktop/latest.json"
+        );
+    }
 
     /// Verify the throttle logic: progress callback fires on the last chunk
     /// (when downloaded == total) even if the time throttle hasn't elapsed.

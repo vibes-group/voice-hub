@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ArrowLeftRight, LogIn } from 'lucide-react';
+import { DesktopDownloadButton } from './components/DesktopDownloadButton';
 import { isTauri } from './utils/tauri';
 import './styles/main.css';
 
@@ -64,6 +65,11 @@ export function Login() {
         >
           <ArrowLeftRight size={18} />
         </button>
+      )}
+      {!isTauri() && (
+        <div className="fixed top-4 right-4 z-10">
+          <DesktopDownloadButton />
+        </div>
       )}
       <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
         <div className="flex items-center gap-2.5 mb-6">

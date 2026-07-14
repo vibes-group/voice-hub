@@ -23,7 +23,12 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   // Same-origin only; realtime paths always hit the network untouched.
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ws")) return;
+  if (
+    url.pathname.startsWith("/api") ||
+    url.pathname.startsWith("/ws") ||
+    url.pathname.startsWith("/desktop")
+  )
+    return;
 
   // Navigations: network-first; cache each page under its own URL and fall
   // back offline to that page, then to the shell.
