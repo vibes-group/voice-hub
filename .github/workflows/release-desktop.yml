@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      is_release: ${{ steps.tag.outputs.is_release }}
     permissions:
       contents: write
     steps:
@@ -56,9 +57,15 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            tag="${{ inputs.tag }}"
           else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build changelog
@@ -120,7 +127,7 @@ jobs:
 
   publish-update-mirror:
     needs: build-windows
-    if: ${{ startsWith(needs.build-windows.outputs.tag, 'v') && !contains(needs.build-windows.outputs.tag, '-') }}
+    if: ${{ needs.build-windows.outputs.is_release == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
