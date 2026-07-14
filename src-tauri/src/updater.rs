@@ -17,9 +17,6 @@ const INTERVAL: Duration = Duration::from_secs(60 * 60);
 const FOCUS_THROTTLE: Duration = Duration::from_secs(15 * 60);
 const PROGRESS_EMIT_THROTTLE: Duration = Duration::from_millis(100);
 const SERVER_TIMEOUT: Duration = Duration::from_secs(8);
-const GITHUB_TIMEOUT: Duration = Duration::from_secs(15);
-const GITHUB_ENDPOINT: &str =
-    "https://github.com/vibes-group/voice-hub/releases/latest/download/latest.json";
 
 // IPC payloads for events emitted to the webview. Mirrored on the TS side
 // in frontend/src/types/ipc.ts — keep field names and optionality in sync.
@@ -44,19 +41,8 @@ pub struct UpdateErrorPayload {
 
 pub struct UpdaterState {
     last_checked: Option<Instant>,
-    pending: Option<PendingUpdate>,
+    pending: Option<Update>,
     installing: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum UpdateSource {
-    Server,
-    GitHub,
-}
-
-struct PendingUpdate {
-    update: Update,
-    source: UpdateSource,
 }
 
 impl UpdaterState {
@@ -99,7 +85,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 pub fn pending_version(app: &AppHandle) -> Option<String> {
     let state = app.try_state::<SharedUpdater>()?;
     let s = state.lock().ok()?;
-    s.pending.as_ref().map(|u| u.update.version.clone())
+    s.pending.as_ref().map(|u| u.version.clone())
 }
 
 fn server_endpoint(host: &str) -> Result<Url, String> {
@@ -114,10 +100,6 @@ fn selected_server_endpoint() -> Result<Option<Url>, String> {
     connection::load_host()
         .map(|host| server_endpoint(&host))
         .transpose()
-}
-
-fn github_endpoint() -> Url {
-    Url::parse(GITHUB_ENDPOINT).expect("GITHUB_ENDPOINT must be a valid URL")
 }
 
 async fn check_endpoint(
@@ -135,26 +117,11 @@ async fn check_endpoint(
     updater.check().await.map_err(|e| format!("check: {e}"))
 }
 
-async fn discover_update(app: &AppHandle) -> Result<Option<PendingUpdate>, String> {
-    match selected_server_endpoint() {
-        Ok(Some(endpoint)) => match check_endpoint(app, endpoint, SERVER_TIMEOUT).await {
-            Ok(update) => {
-                return Ok(update.map(|update| PendingUpdate {
-                    update,
-                    source: UpdateSource::Server,
-                }));
-            }
-            Err(err) => log::warn!("updater: selected server unavailable, trying GitHub: {err}"),
-        },
-        Ok(None) => {}
-        Err(err) => log::warn!("updater: invalid selected server, trying GitHub: {err}"),
-    }
-
-    let update = check_endpoint(app, github_endpoint(), GITHUB_TIMEOUT).await?;
-    Ok(update.map(|update| PendingUpdate {
-        update,
-        source: UpdateSource::GitHub,
-    }))
+async fn discover_update(app: &AppHandle) -> Result<Option<Update>, String> {
+    let Some(endpoint) = selected_server_endpoint()? else {
+        return Ok(None);
+    };
+    check_endpoint(app, endpoint, SERVER_TIMEOUT).await
 }
 
 /// Check for an update; `force` skips the focus throttle.
@@ -174,7 +141,7 @@ pub async fn check(app: AppHandle, force: bool) {
         Err(err) => log::error!("updater: state mutex poisoned (last_checked): {err}"),
     }
 
-    let pending = match discover_update(&app).await {
+    let update = match discover_update(&app).await {
         Ok(Some(u)) => u,
         Ok(None) => return,
         Err(err) => {
@@ -183,14 +150,11 @@ pub async fn check(app: AppHandle, force: bool) {
         }
     };
 
-    let version = pending.update.version.clone();
+    let version = update.version.clone();
     match shared.lock() {
         Ok(mut s) => {
-            let already_known = s
-                .pending
-                .as_ref()
-                .is_some_and(|u| u.update.version == version);
-            s.pending = Some(pending);
+            let already_known = s.pending.as_ref().is_some_and(|u| u.version == version);
+            s.pending = Some(update);
             if already_known {
                 return;
             }
@@ -288,7 +252,7 @@ async fn install_with_events(update: Update, app: &AppHandle) -> Result<(), Stri
 #[tauri::command]
 pub async fn apply_update(app: AppHandle) -> Result<(), String> {
     // Guard + extract pending update in one lock scope.
-    let pending = {
+    let update = {
         let state = app
             .try_state::<SharedUpdater>()
             .ok_or_else(|| "updater state missing".to_string())?;
@@ -296,21 +260,12 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
         if s.installing {
             return Err("install already in progress".to_string());
         }
-        let pending = s.pending.take().ok_or_else(|| "no pending update".to_string())?;
+        let update = s.pending.take().ok_or_else(|| "no pending update".to_string())?;
         s.installing = true;
-        pending
+        update
     };
 
-    let source = pending.source;
-    let mut result = install_with_events(pending.update, &app).await;
-    if result.is_err() && source == UpdateSource::Server {
-        log::warn!("updater: server download failed, trying GitHub");
-        match check_endpoint(&app, github_endpoint(), GITHUB_TIMEOUT).await {
-            Ok(Some(update)) => result = install_with_events(update, &app).await,
-            Ok(None) => log::warn!("updater: GitHub has no applicable update"),
-            Err(err) => log::warn!("updater: GitHub fallback failed: {err}"),
-        }
-    }
+    let result = install_with_events(update, &app).await;
 
     if let Err(ref err) = result {
         log::error!("updater: install failed: {err}");
