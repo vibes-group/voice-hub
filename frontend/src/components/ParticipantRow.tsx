@@ -4,6 +4,18 @@ import { useStore } from '../store/useStore';
 import { PEER_LABEL_MAX, savePeerLabel, savePeerVolume } from '../utils/storage';
 import type { ParticipantUI } from '../types';
 
+type MetaTone = 'good' | 'danger' | 'muted' | 'connecting';
+
+const TONE_STYLES: Record<MetaTone, { dot: string; text: string }> = {
+  good: { dot: 'bg-good', text: 'text-good' },
+  danger: { dot: 'bg-danger', text: 'text-danger' },
+  connecting: {
+    dot: 'bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite]',
+    text: 'text-muted-2',
+  },
+  muted: { dot: 'bg-muted-2', text: 'text-muted-2' },
+};
+
 interface Props {
   participant: ParticipantUI;
   onRemoteGainChange: () => void;
@@ -12,6 +24,7 @@ interface Props {
 
 function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) {
   const updateParticipant = useStore((s) => s.updateParticipant);
+  const inVoice = useStore((s) => s.joinState === 'joined');
   const lastPingSentAt = useStore((s) => s.lastPingSentByTarget.get(participant.id) ?? 0);
   const [, forceTick] = useState(0);
   const [editingLabel, setEditingLabel] = useState(false);
@@ -51,45 +64,33 @@ function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) 
 
   const isLurker = Boolean(participant.chatOnly);
   const isMuted = participant.isSelf ? participant.selfMuted : participant.localMuted;
-  const isReady = participant.isSelf || participant.hasStream;
+  // Chat-only viewers never receive remote media, so hasStream is always false
+  // for voice peers — treat them as ready to avoid a permanent dimmed row.
+  const isReady = participant.isSelf || participant.hasStream || !inVoice;
 
-  let metaText: string;
-  let metaTone: 'good' | 'danger' | 'muted' | 'connecting';
-  if (isLurker) {
-    metaText = 'только чат';
-    metaTone = 'muted';
-  } else if (participant.isSelf) {
-    if (participant.selfMuted) {
-      metaText = 'микрофон выключен';
-      metaTone = 'danger';
-    } else if (participant.speaking) {
-      metaText = 'говорит';
-      metaTone = 'good';
-    } else {
-      metaText = 'в эфире';
-      metaTone = 'muted';
+  function statusMeta(): { text: string; tone: MetaTone } {
+    if (isLurker) return { text: 'только чат', tone: 'muted' };
+    if (participant.isSelf) {
+      if (participant.selfMuted) return { text: 'микрофон выключен', tone: 'danger' };
+      if (participant.speaking) return { text: 'говорит', tone: 'good' };
+      return { text: 'в эфире', tone: 'muted' };
     }
-  } else if (participant.hasStream) {
-    if (participant.localMuted) {
-      metaText = 'заглушён вами';
-      metaTone = 'danger';
-    } else if (participant.remoteDeafened) {
-      metaText = 'не слышит';
-      metaTone = 'danger';
-    } else if (participant.remoteMuted) {
-      metaText = 'микрофон выключен';
-      metaTone = 'danger';
-    } else if (participant.speaking) {
-      metaText = 'говорит';
-      metaTone = 'good';
-    } else {
-      metaText = 'слышно';
-      metaTone = 'muted';
+    if (participant.hasStream) {
+      if (participant.localMuted) return { text: 'заглушён вами', tone: 'danger' };
+      if (participant.remoteDeafened) return { text: 'не слышит', tone: 'danger' };
+      if (participant.remoteMuted) return { text: 'микрофон выключен', tone: 'danger' };
+      if (participant.speaking) return { text: 'говорит', tone: 'good' };
+      return { text: 'слышно', tone: 'muted' };
     }
-  } else {
-    metaText = 'подключается';
-    metaTone = 'connecting';
+    // No remote stream. In voice that's a genuine (transient) connecting state;
+    // chat-only viewers never receive media, so hasStream stays false forever —
+    // reflect the join-time snapshot (matches the indicator icons) instead.
+    if (inVoice) return { text: 'подключается', tone: 'connecting' };
+    if (participant.remoteDeafened) return { text: 'не слышит', tone: 'danger' };
+    if (participant.remoteMuted) return { text: 'микрофон выключен', tone: 'danger' };
+    return { text: 'в голосе', tone: 'muted' };
   }
+  const { text: metaText, tone: metaTone } = statusMeta();
 
   const initial = (participant.display || '?').trim().charAt(0).toUpperCase() || '?';
 
@@ -118,17 +119,7 @@ function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) 
           ? 'border-2 border-line bg-bg-0 opacity-70'
           : 'border-2 border-line bg-bg-0 hover:border-line-strong';
 
-  const metaDotClass =
-    metaTone === 'good'
-      ? 'bg-good'
-      : metaTone === 'danger'
-        ? 'bg-danger'
-        : metaTone === 'connecting'
-          ? 'bg-accent animate-[vh-pulse_1.4s_ease-in-out_infinite]'
-          : 'bg-muted-2';
-
-  const metaTextClass =
-    metaTone === 'good' ? 'text-good' : metaTone === 'danger' ? 'text-danger' : 'text-muted-2';
+  const { dot: metaDotClass, text: metaTextClass } = TONE_STYLES[metaTone];
 
   const avatarRing = participant.speaking ? 'ring-2 ring-accent ring-offset-0' : '';
 
