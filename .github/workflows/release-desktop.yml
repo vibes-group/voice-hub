@@ -118,9 +118,9 @@ jobs:
           args: --target ${{ env.DESKTOP_TARGET }}
           updaterJsonPreferNsis: true
 
-  mirror-to-server:
+  publish-update-mirror:
     needs: build-windows
-    if: github.event_name == 'push'
+    if: ${{ startsWith(needs.build-windows.outputs.tag, 'v') && !contains(needs.build-windows.outputs.tag, '-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
