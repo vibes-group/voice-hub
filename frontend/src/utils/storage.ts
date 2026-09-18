@@ -7,6 +7,7 @@ import { ENGINE_IDS } from '../audio/engine';
 import { isRoomSlug, DEFAULT_ROOM_SLUG, type RoomSlug } from '../rooms';
 import type { Attachment } from '../sfu/protocol';
 import { deleteBlob, getChatRecord, putChatRecord } from './blobCache';
+import { isMobileBrowser } from './platform';
 
 export const KEYS = {
   // Audio / engine
@@ -271,7 +272,10 @@ const ENGINE_VALUES: EngineKind[] = ['off', ...ENGINE_IDS];
 
 export function loadEngine(): EngineKind {
   const raw = localStorage.getItem(KEYS.engine);
-  return ENGINE_VALUES.includes(raw as EngineKind) ? (raw as EngineKind) : 'rnnoise';
+  if (ENGINE_VALUES.includes(raw as EngineKind)) return raw as EngineKind;
+  // RNNoise runs a WASM frame loop on the audio thread; phone CPUs miss the
+  // deadline and the mic stutters, so phones fall back to the OS suppressor.
+  return isMobileBrowser() ? 'browser' : 'rnnoise';
 }
 
 export function saveEngine(e: EngineKind): void {
