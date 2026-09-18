@@ -1,4 +1,4 @@
-FROM node:24.15-bookworm-slim AS frontend
+FROM node:24.21-bookworm-slim AS frontend
 
 WORKDIR /src/frontend
 
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux \
     go build -ldflags="-s -w" -o /out/voice-hub-app ./cmd/server
 
-FROM debian:12-slim
+FROM debian:13-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates wget \
