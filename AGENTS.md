@@ -41,6 +41,5 @@ Range pairs: `<NAME>_MIN` / `<NAME>_MAX`. Required vars have no defaults, crash 
 ## Git
 
 - Conventional commits (`feat:`, `fix:`, `chore(desktop):`) — `release-desktop.yml` parses the prefix.
-- No `--amend` on published commits, no force-push to master.
 - Don't tag manually — auto-tag bot handles it.
 - Workflow triggers use positive `paths`, never `paths-ignore` — a forgotten path fails loudly instead of causing silent extra runs and auto-tag loops.
