@@ -156,7 +156,7 @@ func main() {
 	internalMux := http.NewServeMux()
 	internalMux.HandleFunc("GET /internal/call-status", handler.CallStatus(func() bool {
 		for _, room := range rooms {
-			if len(room.Peers()) > 0 {
+			if callInProgress(room.Peers()) {
 				return true
 			}
 		}
@@ -227,6 +227,26 @@ func loadSecrets(dataDir string) (sessionSecret, turnSecret []byte, err error) {
 		return nil, nil, fmt.Errorf("turn secret: %w", err)
 	}
 	return sessionSecret, turnSecret, nil
+}
+
+// callInProgress reports whether the peers of one room are holding a conversation,
+// which is what /internal/call-status answers and what a deploy waits out.
+//
+// Chat-only peers are not counted: they hold no PeerConnection, so they neither send
+// nor hear audio, and a room of them has nothing to interrupt however full it is. One
+// peer alone is not a call either — there is no one on the other side.
+func callInProgress(peers []protocol.PeerInfo) bool {
+	audible := 0
+	for _, p := range peers {
+		if p.ChatOnly {
+			continue
+		}
+		audible++
+		if audible == 2 {
+			return true
+		}
+	}
+	return false
 }
 
 // buildRooms creates the SFU rooms and the presence hub that fans out peer events.
