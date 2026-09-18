@@ -27,6 +27,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM debian:13-slim
 
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends ca-certificates wget \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd -r app && useradd -r -g app -u 10001 -d /app -s /sbin/nologin app
