@@ -27,6 +27,8 @@ import { ScreenShareFocused } from './components/ScreenShareFocused';
 import { selectOtherShares, useScreenShareStore } from './store/useScreenShareStore';
 import { useAppVersion } from './hooks/useAppVersion';
 import { useLurkerWS } from './hooks/useLurkerWS';
+import { useIsMobile } from './hooks/useIsMobile';
+import { MobileLayout } from './components/MobileLayout';
 
 export function App() {
   // App does not render any store field directly — children subscribe per-card.
@@ -35,6 +37,7 @@ export function App() {
   const audio = useAudioEngine();
   const sfu = useSFU();
   const { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState } = useAppVersion();
+  const isMobile = useIsMobile();
 
   // Display name local state (synced to localStorage).
   const [displayName, setDisplayName] = useState<string>(() =>
@@ -310,6 +313,85 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [focusedId, handleTileClick]);
 
+  const updateBanner = (
+    <UpdateBanner
+      update={update}
+      reload={reload}
+      applyDesktopUpdate={applyDesktopUpdate}
+      desktopApplyState={desktopApplyState}
+    />
+  );
+  const sessionCard = (
+    <SessionCard
+      onJoin={session.join}
+      onLeave={session.leave}
+      onToggleSelfMute={handleToggleSelfMute}
+      onToggleDeafen={handleToggleDeafen}
+      displayName={displayName}
+      onDisplayNameChange={handleDisplayNameChange}
+    />
+  );
+  const participantsCard = (
+    <ParticipantsCard
+      onRemoteGainChange={audio.applyAllRemoteGains}
+      onPingUser={handlePingUser}
+      onRoomSelect={(slug) => void session.switchRoom(slug)}
+    />
+  );
+  const screenShareButton = voiceActive && (
+    <ScreenShareButton
+      onStart={session.startScreenShare}
+      onStop={session.stopScreenShare}
+      onUpdateParams={session.updateScreenShareParams}
+      onShareModeChange={session.changeScreenShareMode}
+    />
+  );
+  const screenShareGallery = <ScreenShareGallery onTileClick={handleTileClick} />;
+  const chatPanel = (
+    <ChatPanel roomId={roomSlug} onSend={handleChatSend} onDelete={handleChatDelete} />
+  );
+  const audioCard = (
+    <AudioCard
+      onEngineSelect={handleEngineSelect}
+      onMicDeviceSelect={handleMicDeviceSelect}
+      onSendVolumeChange={handleSendVolumeChange}
+      onOutputVolumeChange={handleOutputVolumeChange}
+      onReset={handleAudioReset}
+    />
+  );
+  const footer = <Footer uiVersion={bootVersion} />;
+
+  if (isMobile) {
+    return (
+      <>
+        <PingToast />
+        <ScreenShareFocused onClose={handleFocusedClose} />
+        <MobileLayout
+          banner={updateBanner}
+          voice={
+            <>
+              {sessionCard}
+              {screenShareButton}
+              {screenShareGallery}
+              {participantsCard}
+            </>
+          }
+          chat={chatPanel}
+          settings={
+            <>
+              {audioCard}
+              <PingCard />
+              {footer}
+            </>
+          }
+          onToggleSelfMute={handleToggleSelfMute}
+          onToggleDeafen={handleToggleDeafen}
+          onLeave={session.leave}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <PingToast />
@@ -320,53 +402,24 @@ export function App() {
           max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-3"
       >
         <TopBar />
-        <UpdateBanner
-          update={update}
-          reload={reload}
-          applyDesktopUpdate={applyDesktopUpdate}
-          desktopApplyState={desktopApplyState}
-        />
+        {updateBanner}
         <div className="grid gap-4 grid-cols-[400px_minmax(0,1fr)_400px] max-[1340px]:grid-cols-1 items-start">
           <div className="flex flex-col gap-4 min-h-0" style={{ height: 840 }}>
-            <SessionCard
-              onJoin={session.join}
-              onLeave={session.leave}
-              onToggleSelfMute={handleToggleSelfMute}
-              onToggleDeafen={handleToggleDeafen}
-              displayName={displayName}
-              onDisplayNameChange={handleDisplayNameChange}
-            />
-            <ParticipantsCard
-              onRemoteGainChange={audio.applyAllRemoteGains}
-              onPingUser={handlePingUser}
-              onRoomSelect={(slug) => void session.switchRoom(slug)}
-            />
+            {sessionCard}
+            {participantsCard}
           </div>
           <div className="flex flex-col gap-4 min-h-0" style={{ height: 840 }}>
-            {voiceActive && (
-              <ScreenShareButton
-                onStart={session.startScreenShare}
-                onStop={session.stopScreenShare}
-                onUpdateParams={session.updateScreenShareParams}
-                onShareModeChange={session.changeScreenShareMode}
-              />
-            )}
-            <ScreenShareGallery onTileClick={handleTileClick} />
-            <ChatPanel roomId={roomSlug} onSend={handleChatSend} onDelete={handleChatDelete} />
+            {screenShareButton}
+            {screenShareGallery}
+            {chatPanel}
           </div>
           <div className="grid gap-4 content-start">
-            <AudioCard
-              onEngineSelect={handleEngineSelect}
-              onMicDeviceSelect={handleMicDeviceSelect}
-              onSendVolumeChange={handleSendVolumeChange}
-              onOutputVolumeChange={handleOutputVolumeChange}
-              onReset={handleAudioReset}
-            />
+            {audioCard}
             <PingCard />
             <HotkeyCard onStatusMessage={handleStatusMessage} />
           </div>
         </div>
-        <Footer uiVersion={bootVersion} />
+        {footer}
       </main>
     </>
   );

@@ -206,7 +206,7 @@ function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) 
                 onClick={beginEditLabel}
                 title="Добавить метку"
                 aria-label="Добавить метку"
-                className="shrink-0 text-muted-2 hover:text-accent cursor-pointer opacity-0 group-hover/label:opacity-100 transition-opacity grid place-items-center"
+                className="shrink-0 text-muted-2 hover:text-accent cursor-pointer opacity-0 group-hover/label:opacity-100 mobile:opacity-100 transition-opacity grid place-items-center"
               >
                 <Tag size={16} />
               </button>
@@ -260,7 +260,7 @@ function ParticipantRowImpl({ participant, onRemoteGainChange, onPing }: Props) 
             aria-pressed={participant.localMuted}
             aria-label={participant.localMuted ? 'Слушать' : 'Заглушить'}
             title={participant.localMuted ? 'Слушать' : 'Заглушить'}
-            className={`grid place-items-center w-9 h-9 border transition-colors shrink-0 ${
+            className={`grid place-items-center w-9 h-9 mobile:w-11 mobile:h-11 border transition-colors shrink-0 ${
               participant.localMuted
                 ? 'border-danger text-danger bg-[rgba(248,113,113,0.08)] hover:bg-danger hover:text-accent-ink'
                 : 'border-line text-muted hover:border-accent hover:text-accent'

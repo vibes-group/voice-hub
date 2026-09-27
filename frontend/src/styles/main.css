@@ -1,6 +1,10 @@
 @import 'tailwindcss';
 @import '@fontsource-variable/manrope/index.css';
 
+/* <html class="mobile"> is set by hooks/useIsMobile.ts. Ancestor form, so the
+   variant also works on pseudo-elements (slider thumbs, ::after). */
+@custom-variant mobile (:where(.mobile) &);
+
 @theme {
   /* Signal Minimal palette — pure black canvas, deep gray cards, vibrant green accent. */
   --color-bg-0: #050505;
@@ -38,6 +42,12 @@
   html,
   body {
     height: 100%;
+  }
+
+  /* Pull-to-refresh would drop the call. */
+  html.mobile {
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
@@ -251,6 +261,35 @@
     width: 14px;
     height: 14px;
   }
+  /* One finger-sized slider on phones; after -sm so it wins for both. */
+  .vh-range {
+    @variant mobile {
+      height: 32px;
+    }
+  }
+  .vh-range::-webkit-slider-runnable-track {
+    @variant mobile {
+      height: 4px;
+    }
+  }
+  .vh-range::-webkit-slider-thumb {
+    @variant mobile {
+      width: 24px;
+      height: 24px;
+      margin-top: -10px;
+    }
+  }
+  .vh-range::-moz-range-track {
+    @variant mobile {
+      height: 4px;
+    }
+  }
+  .vh-range::-moz-range-thumb {
+    @variant mobile {
+      width: 24px;
+      height: 24px;
+    }
+  }
 
   /* Square toggle — sharp, 48x24, green when on, dark square dot slides. */
   .vh-toggle {
@@ -259,6 +298,14 @@
   }
   .vh-toggle:hover {
     border-color: var(--color-accent);
+  }
+  /* Finger-sized hit area without changing the look. */
+  .vh-toggle::after {
+    @variant mobile {
+      content: '';
+      position: absolute;
+      inset: -10px;
+    }
   }
   .vh-toggle[aria-checked='true']:hover,
   .vh-toggle[data-checked='true']:hover {

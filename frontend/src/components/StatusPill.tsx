@@ -13,11 +13,11 @@ export function StatusPill() {
   return (
     <div
       id="status"
-      className={`inline-flex items-center gap-2 px-3 h-9 bg-bg-0 border border-line text-[11px] font-bold uppercase tracking-[0.14em] ${wrapColor}`}
+      className={`inline-flex items-center gap-2 px-3 h-9 bg-bg-0 border border-line text-[11px] font-bold uppercase tracking-[0.14em] mobile:h-11 mobile:max-w-full ${wrapColor}`}
       data-state={statusState}
     >
       <span className={`w-1.5 h-1.5 shrink-0 ${dotColor}`} />
-      <span>{statusText}</span>
+      <span className="mobile:truncate">{statusText}</span>
     </div>
   );
 }

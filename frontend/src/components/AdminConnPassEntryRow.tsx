@@ -73,14 +73,14 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
                 if (e.key === 'Escape') setRenamingID(null);
               }}
               maxLength={64}
-              className="flex-1 bg-bg-1 border border-line px-2 py-1 text-[12px] text-text focus:border-accent outline-none"
+              className="flex-1 bg-bg-1 border border-line px-2 py-1 text-[12px] mobile:text-[16px] text-text focus:border-accent outline-none"
               autoFocus
             />
             <button
               type="button"
               onClick={commitRename}
               disabled={busy}
-              className="p-1 text-accent hover:bg-[rgba(255,255,255,0.04)]"
+              className="p-1 mobile:p-2.5 text-accent hover:bg-[rgba(255,255,255,0.04)]"
               title="Сохранить"
             >
               <Check size={14} />
@@ -88,7 +88,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
             <button
               type="button"
               onClick={() => setRenamingID(null)}
-              className="p-1 text-muted hover:bg-[rgba(255,255,255,0.04)]"
+              className="p-1 mobile:p-2.5 text-muted hover:bg-[rgba(255,255,255,0.04)]"
               title="Отмена"
             >
               <X size={14} />
@@ -112,7 +112,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
             type="button"
             onClick={() => setTtlEditingID(entry.id)}
             disabled={busy}
-            className="p-1.5 text-muted-2 hover:text-text hover:bg-[rgba(255,255,255,0.04)]"
+            className="p-1.5 mobile:p-2.5 text-muted-2 hover:text-text hover:bg-[rgba(255,255,255,0.04)]"
             title="Изменить срок"
           >
             <Clock size={14} />
@@ -124,7 +124,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
               setRenameValue(entry.label);
             }}
             disabled={busy}
-            className="p-1.5 text-muted-2 hover:text-text hover:bg-[rgba(255,255,255,0.04)]"
+            className="p-1.5 mobile:p-2.5 text-muted-2 hover:text-text hover:bg-[rgba(255,255,255,0.04)]"
             title="Переименовать"
           >
             <Edit2 size={14} />
@@ -133,7 +133,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
             type="button"
             onClick={() => onRotate(entry.id, entry.label)}
             disabled={busy}
-            className="p-1.5 text-muted-2 hover:text-accent hover:bg-[rgba(255,255,255,0.04)]"
+            className="p-1.5 mobile:p-2.5 text-muted-2 hover:text-accent hover:bg-[rgba(255,255,255,0.04)]"
             title="Перегенерировать"
           >
             <RefreshCw size={14} />
@@ -142,7 +142,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
             type="button"
             onClick={() => onRevoke(entry.id, entry.label)}
             disabled={busy}
-            className="p-1.5 text-muted-2 hover:text-danger hover:bg-[rgba(248,113,113,0.08)]"
+            className="p-1.5 mobile:p-2.5 text-muted-2 hover:text-danger hover:bg-[rgba(248,113,113,0.08)]"
             title="Удалить"
           >
             <Trash2 size={14} />
@@ -161,7 +161,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
                 setTtlEditingID(null);
               }
             }}
-            className="bg-bg-1 border border-line px-2 py-1 text-[12px] text-text focus:border-accent outline-none"
+            className="bg-bg-1 border border-line px-2 py-1 text-[12px] mobile:text-[16px] text-text focus:border-accent outline-none"
             autoFocus
           >
             <option value="" disabled>Срок…</option>
@@ -174,7 +174,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
           <button
             type="button"
             onClick={() => setTtlEditingID(null)}
-            className="p-1 text-muted hover:bg-[rgba(255,255,255,0.04)]"
+            className="p-1 mobile:p-2.5 text-muted hover:bg-[rgba(255,255,255,0.04)]"
             title="Отмена"
           >
             <X size={14} />

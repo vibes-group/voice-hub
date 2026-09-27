@@ -18,7 +18,7 @@ export function LogoutButton() {
       onClick={handleLogout}
       title="Выйти"
       aria-label="Выйти"
-      className="inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2
+      className="inline-flex items-center justify-center w-9 h-9 mobile:w-11 mobile:h-11 bg-bg-0 border border-line text-muted-2
         hover:text-danger hover:border-danger transition-colors"
     >
       <LogOut size={18} />

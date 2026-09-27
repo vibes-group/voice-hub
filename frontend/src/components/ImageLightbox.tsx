@@ -86,7 +86,7 @@ function Viewer({
             type="button"
             onClick={() => void downloadAttachment(current, roomId)}
             aria-label="Скачать"
-            className="rounded p-1 hover:bg-white/10"
+            className="rounded p-1 mobile:p-3.5 hover:bg-white/10"
           >
             <Download size={18} strokeWidth={2.25} />
           </button>
@@ -98,7 +98,7 @@ function Viewer({
             }}
             aria-label="Удалить"
             title="Удалить (освободить место)"
-            className="rounded p-1 hover:bg-white/10 hover:text-danger"
+            className="rounded p-1 mobile:p-3.5 hover:bg-white/10 hover:text-danger"
           >
             <Trash2 size={18} strokeWidth={2.25} />
           </button>
@@ -106,7 +106,7 @@ function Viewer({
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded p-1 hover:bg-white/10"
+            className="rounded p-1 mobile:p-3.5 hover:bg-white/10"
           >
             <X size={18} strokeWidth={2.25} />
           </button>

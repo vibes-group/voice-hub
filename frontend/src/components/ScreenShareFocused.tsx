@@ -98,7 +98,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
       <header className="flex items-center justify-between px-4 py-2 text-zinc-200">
-        <span className="text-sm font-medium truncate flex items-center gap-2">
+        <span className="text-sm font-medium truncate flex items-center gap-2 mobile:min-w-0 mobile:flex-wrap">
           Экран · {display}
           {videoCodec && (
             <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
@@ -123,7 +123,7 @@ export function ScreenShareFocused({ onClose }: Props) {
                 type="button"
                 onClick={toggleAudioMute}
                 aria-label={audioMuted ? 'Включить звук' : 'Выключить звук'}
-                className="rounded p-1 hover:bg-white/10"
+                className="rounded p-1 mobile:p-3.5 hover:bg-white/10"
               >
                 {audioMuted ? (
                   <VolumeX size={18} strokeWidth={2.25} />
@@ -139,7 +139,7 @@ export function ScreenShareFocused({ onClose }: Props) {
                 value={Math.round((audioMuted ? 0 : volume) * 100)}
                 onChange={onVolumeInput}
                 aria-label="Громкость звука с экрана"
-                className="w-24 accent-zinc-300"
+                className="w-24 mobile:w-20 accent-zinc-300"
               />
             </>
           )}
@@ -147,7 +147,7 @@ export function ScreenShareFocused({ onClose }: Props) {
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded p-1 hover:bg-white/10"
+            className="rounded p-1 mobile:p-3.5 hover:bg-white/10"
           >
             <X size={18} strokeWidth={2.25} />
           </button>

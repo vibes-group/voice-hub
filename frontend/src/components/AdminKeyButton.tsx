@@ -148,7 +148,7 @@ export function AdminKeyButton() {
         onClick={handleOpen}
         title="Управление паролями подключения"
         aria-label="Управление паролями подключения"
-        className="inline-flex items-center justify-center w-9 h-9 bg-bg-0 border border-line text-muted-2 hover:text-accent hover:border-accent transition-colors"
+        className="inline-flex items-center justify-center w-9 h-9 mobile:w-11 mobile:h-11 bg-bg-0 border border-line text-muted-2 hover:text-accent hover:border-accent transition-colors"
       >
         <Key size={18} />
       </button>
@@ -159,7 +159,7 @@ export function AdminKeyButton() {
           onClick={handleClose}
         >
           <div
-            className="card card-lg w-[min(520px,100%)] p-6"
+            className="card card-lg w-[min(520px,100%)] p-6 mobile:p-4 mobile:max-h-full mobile:overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {mode === 'list' && (
@@ -189,7 +189,7 @@ export function AdminKeyButton() {
                   </div>
                 )}
 
-                <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-2 mb-4 mobile:flex-wrap">
                   <input
                     type="text"
                     value={newLabel}
@@ -200,13 +200,13 @@ export function AdminKeyButton() {
                     placeholder="Название (необязательно)"
                     maxLength={64}
                     disabled={busy || atLimit}
-                    className="flex-1 bg-bg-0 border border-line px-3 py-2 text-[13px] text-text placeholder:text-muted-2 focus:border-accent outline-none disabled:opacity-50"
+                    className="flex-1 bg-bg-0 border border-line px-3 py-2 text-[13px] mobile:basis-full mobile:py-2.5 mobile:text-[16px] text-text placeholder:text-muted-2 focus:border-accent outline-none disabled:opacity-50"
                   />
                   <select
                     value={newTTL}
                     onChange={(e) => setNewTTL(Number(e.target.value))}
                     disabled={busy || atLimit}
-                    className="bg-bg-0 border border-line px-2 py-2 text-[13px] text-text focus:border-accent outline-none disabled:opacity-50"
+                    className="bg-bg-0 border border-line px-2 py-2 text-[13px] mobile:flex-1 mobile:py-2.5 mobile:text-[16px] text-text focus:border-accent outline-none disabled:opacity-50"
                     title="Срок действия"
                   >
                     {TTL_PRESETS.map((p) => (

@@ -198,6 +198,18 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
     }
   }, [messages.length]);
 
+  // Stay pinned to the newest message when the list shrinks — e.g. the mobile
+  // voice bar appearing under it.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (atBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Auto-resize textarea up to ~5 lines.
   useEffect(() => {
     const el = textareaRef.current;
@@ -513,7 +525,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      <div className="px-6 pt-5 pb-4 border-b border-line shrink-0">
+      <div className="px-6 pt-5 pb-4 border-b border-line shrink-0 mobile:landscape:hidden">
         <h2 className="card-title flex items-center gap-1.5">
           Чат
           <span
@@ -523,7 +535,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             <Info size={15} strokeWidth={2} aria-label="Как работает чат" />
             <span
               role="tooltip"
-              className="pointer-events-none invisible absolute left-0 top-full z-20 mt-2 w-max whitespace-pre border border-line-strong bg-bg-3 px-3 py-2 text-[12px] leading-snug text-muted normal-case tracking-normal font-normal opacity-0 shadow-lg transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+              className="pointer-events-none invisible absolute left-0 top-full z-20 mt-2 w-max whitespace-pre mobile:w-[min(18rem,calc(100vw-7rem))] mobile:whitespace-pre-line border border-line-strong bg-bg-3 px-3 py-2 text-[12px] leading-snug text-muted normal-case tracking-normal font-normal opacity-0 shadow-lg transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
             >
               {CHAT_HINT}
             </span>
@@ -592,6 +604,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder="Сообщение…"
+            enterKeyHint="send"
             rows={1}
             className="flex-1 resize-none bg-transparent px-3 py-2 text-[17px] text-text placeholder:text-muted-2 focus:outline-none disabled:opacity-40"
             style={{ minHeight: 40, maxHeight: 140, lineHeight: '1.4' }}
