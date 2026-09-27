@@ -19,6 +19,7 @@ import {
   applyParticipantGain,
   type RemoteParticipantAudio,
 } from '../audio/remote';
+import { routeToSpeaker } from '../audio/output';
 import { createSpeakingLoop, type SpeakingLoop } from '../audio/speaking-loop';
 import { isCaptureEngine, preloadEngine } from '../audio/engine';
 
@@ -290,6 +291,7 @@ export function useAudioEngine() {
       // Create the shared remote AudioContext lazily on first attach.
       if (!r.remoteAudioCtx) {
         r.remoteAudioCtx = createRemoteAudioContext();
+        void routeToSpeaker(r.remoteAudioCtx);
       }
       const audio = setupParticipantAudio(r.remoteAudioCtx, stream);
       r.remoteAudio.set(participantId, audio);
@@ -331,6 +333,11 @@ export function useAudioEngine() {
     r.remoteAudioCtx = null;
   }, []);
 
+  const routeRemoteToSpeaker = useCallback(() => {
+    const ctx = refs.current.remoteAudioCtx;
+    if (ctx) void routeToSpeaker(ctx);
+  }, []);
+
   const fullCleanup = useCallback(() => {
     clearLocalGraph();
     cleanupAllRemote();
@@ -346,6 +353,7 @@ export function useAudioEngine() {
     attachRemoteStream,
     detachRemoteStream,
     applyAllRemoteGains,
+    routeRemoteToSpeaker,
     cleanupAllRemote,
     fullCleanup,
   };

@@ -16,6 +16,8 @@ export const KEYS = {
   engine: 'voice-hub.engine',
   // Selected microphone deviceId, or empty string for system default.
   micDeviceId: 'voice-hub.mic-device-id',
+  // Selected speaker deviceId, absent for system default.
+  speakerDeviceId: 'voice-hub.speaker-device-id',
   // Persistent mute/deafen state — Discord-style, survives reloads.
   // outputMuted is derived from deafened (no separate key).
   selfMuted: 'voice-hub.self-muted',
@@ -300,6 +302,16 @@ export function loadMicDeviceId(): string | null {
 export function saveMicDeviceId(id: string | null): void {
   if (id) localStorage.setItem(KEYS.micDeviceId, id);
   else localStorage.removeItem(KEYS.micDeviceId);
+}
+
+// Selected speaker deviceId. null = use system default.
+export function loadSpeakerDeviceId(): string | null {
+  return localStorage.getItem(KEYS.speakerDeviceId) || null;
+}
+
+export function saveSpeakerDeviceId(id: string | null): void {
+  if (id) localStorage.setItem(KEYS.speakerDeviceId, id);
+  else localStorage.removeItem(KEYS.speakerDeviceId);
 }
 
 // Shortcut binding (JSON-serialised InputBinding | null).

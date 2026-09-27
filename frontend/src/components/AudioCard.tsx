@@ -3,11 +3,13 @@ import { ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { EngineKind } from '../types';
 import { ENGINE_OPTIONS, type ActiveEngineKind } from '../audio/engine';
+import { SPEAKER_SELECTABLE } from '../audio/output';
 import { ToggleRow } from './Toggle';
 
 interface Props {
   onEngineSelect: (engine: EngineKind) => void;
   onMicDeviceSelect: (deviceId: string | null) => void;
+  onSpeakerDeviceSelect: (deviceId: string | null) => void;
   onSendVolumeChange: (v: number) => void;
   onOutputVolumeChange: (v: number) => void;
   onReset: () => void;
@@ -25,6 +27,7 @@ function SliderHead({ label, value }: { label: string; value: string }) {
 export function AudioCard({
   onEngineSelect,
   onMicDeviceSelect,
+  onSpeakerDeviceSelect,
   onSendVolumeChange,
   onOutputVolumeChange,
   onReset,
@@ -33,7 +36,11 @@ export function AudioCard({
   const sendVolume = useStore((s) => s.sendVolume);
   const outputVolume = useStore((s) => s.outputVolume);
   const micDeviceId = useStore((s) => s.micDeviceId);
-  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  const speakerDeviceId = useStore((s) => s.speakerDeviceId);
+  // Real devices only: the "default"/"communications" aliases duplicate one.
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const micDevices = devices.filter((d) => d.kind === 'audioinput');
+  const speakerDevices = devices.filter((d) => d.kind === 'audiooutput');
   // Remembers the last non-off engine so toggling the switch back on restores
   // the chosen variant rather than resetting to the default.
   const [lastVariant, setLastVariant] = useState<ActiveEngineKind>(
@@ -51,10 +58,10 @@ export function AudioCard({
       try {
         const all = await md.enumerateDevices();
         if (cancelled) return;
-        setMicDevices(
+        setDevices(
           all.filter(
             (d) =>
-              d.kind === 'audioinput' &&
+              (d.kind === 'audioinput' || d.kind === 'audiooutput') &&
               d.deviceId &&
               d.deviceId !== 'default' &&
               d.deviceId !== 'communications',
@@ -91,14 +98,18 @@ export function AudioCard({
     };
   }, []);
 
-  // Drop the selected device if it disappeared (unplugged, permission revoked).
+  // Drop a selected device that disappeared (unplugged, permission revoked).
   useEffect(() => {
-    if (!micDeviceId || micDevices.length === 0) return;
-    const stillPresent = micDevices.some((d) => d.deviceId === micDeviceId);
-    if (!stillPresent) onMicDeviceSelect(null);
-  }, [micDeviceId, micDevices, onMicDeviceSelect]);
+    const gone = (id: string | null, kind: MediaDeviceKind) =>
+      id !== null &&
+      devices.some((d) => d.kind === kind) &&
+      !devices.some((d) => d.kind === kind && d.deviceId === id);
+    if (gone(micDeviceId, 'audioinput')) onMicDeviceSelect(null);
+    if (gone(speakerDeviceId, 'audiooutput')) onSpeakerDeviceSelect(null);
+  }, [devices, micDeviceId, speakerDeviceId, onMicDeviceSelect, onSpeakerDeviceSelect]);
 
   const showMicPicker = micDevices.length > 1;
+  const showSpeakerPicker = SPEAKER_SELECTABLE && speakerDevices.length > 1;
 
   return (
     <section className="card grid gap-5 p-6">
@@ -162,6 +173,35 @@ export function AudioCard({
               {micDevices.map((d, i) => (
                 <option key={d.deviceId} value={d.deviceId}>
                   {d.label || `Микрофон ${i + 1}`}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              size={16}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-2 pointer-events-none"
+            />
+          </div>
+        </div>
+      )}
+
+      {showSpeakerPicker && (
+        <div className="grid gap-2">
+          <label htmlFor="speaker-device" className="section-label">
+            Динамики
+          </label>
+          <div className="relative">
+            <select
+              id="speaker-device"
+              value={speakerDeviceId ?? ''}
+              onChange={(e) => onSpeakerDeviceSelect(e.target.value || null)}
+              className="appearance-none w-full pl-3 pr-9 py-2.5 text-[13px] mobile:text-[16px] uppercase tracking-[0.1em]
+                bg-bg-input border border-line text-muted cursor-pointer
+                hover:border-muted-2 focus:outline-none focus:border-accent transition-colors"
+            >
+              <option value="">Системные по умолчанию</option>
+              {speakerDevices.map((d, i) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Динамики ${i + 1}`}
                 </option>
               ))}
             </select>

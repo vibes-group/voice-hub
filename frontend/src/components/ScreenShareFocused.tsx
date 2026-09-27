@@ -4,6 +4,7 @@ import { useScreenShareStore } from '../store/useScreenShareStore';
 import { useStore } from '../store/useStore';
 import { loadScreenAudioVolume, saveScreenAudioVolume } from '../utils/storage';
 import { formatVideoStats, useVideoFps, useVideoStream } from '../screenshare/useVideoFps';
+import { routeToSpeaker } from '../audio/output';
 
 type Props = {
   onClose: () => void;
@@ -58,6 +59,11 @@ export function ScreenShareFocused({ onClose }: Props) {
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
+
+  const speakerDeviceId = useStore((s) => s.speakerDeviceId);
+  useEffect(() => {
+    if (audioRef.current) void routeToSpeaker(audioRef.current);
+  }, [speakerDeviceId, audioStream]);
 
   function toggleAudioMute() {
     const next = !audioMuted;

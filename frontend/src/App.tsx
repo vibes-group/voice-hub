@@ -170,6 +170,16 @@ export function App() {
     [session],
   );
 
+  const handleSpeakerDeviceSelect = useCallback(
+    (deviceId: string | null) => {
+      const s = useStore.getState();
+      if (deviceId === s.speakerDeviceId) return;
+      s.setSpeakerDeviceId(deviceId);
+      audio.routeRemoteToSpeaker();
+    },
+    [audio],
+  );
+
   // ---- Audio controls ----
 
   const handleSendVolumeChange = useCallback(
@@ -201,9 +211,10 @@ export function App() {
     if (s.micDeviceId !== null) {
       void handleMicDeviceSelect(null);
     }
+    handleSpeakerDeviceSelect(null);
 
     s.setStatus('Настройки звука сброшены.', false, s.joinState === 'joined');
-  }, [audio, handleEngineSelect, handleMicDeviceSelect]);
+  }, [audio, handleEngineSelect, handleMicDeviceSelect, handleSpeakerDeviceSelect]);
 
   const handleStatusMessage = useCallback((msg: string) => {
     const s = useStore.getState();
@@ -354,6 +365,7 @@ export function App() {
     <AudioCard
       onEngineSelect={handleEngineSelect}
       onMicDeviceSelect={handleMicDeviceSelect}
+      onSpeakerDeviceSelect={handleSpeakerDeviceSelect}
       onSendVolumeChange={handleSendVolumeChange}
       onOutputVolumeChange={handleOutputVolumeChange}
       onReset={handleAudioReset}

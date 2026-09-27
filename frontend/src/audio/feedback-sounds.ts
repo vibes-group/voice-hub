@@ -3,15 +3,28 @@
 // Mute (going off): dull triangle, descending 520 → 300 Hz.
 // Unmute (going on): bright sine, wide ascending sweep 392 → 880 Hz.
 
+import { routeToSpeaker } from './output';
+
 const DURATION = 0.12;
 
-function playGlide(from: number, to: number, type: OscillatorType, peak: number): void {
+// A fresh context per cue, routed to the chosen speaker before it starts.
+function withContext(play: (ctx: AudioContext) => void): void {
   let ctx: AudioContext;
   try {
     ctx = new AudioContext({ sampleRate: 48000 });
   } catch {
     return;
   }
+  void routeToSpeaker(ctx).then(() => play(ctx));
+}
+
+function playGlide(
+  ctx: AudioContext,
+  from: number,
+  to: number,
+  type: OscillatorType,
+  peak: number,
+): void {
   const t0 = ctx.currentTime;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
@@ -29,21 +42,18 @@ function playGlide(from: number, to: number, type: OscillatorType, peak: number)
 }
 
 export function playMuteSound(): void {
-  playGlide(520, 300, 'triangle', 0.2);
+  withContext((ctx) => playGlide(ctx, 520, 300, 'triangle', 0.2));
 }
 
 export function playUnmuteSound(): void {
-  playGlide(392, 880, 'sine', 0.16);
+  withContext((ctx) => playGlide(ctx, 392, 880, 'sine', 0.16));
 }
 
 export function playPing(): void {
-  let ctx: AudioContext;
-  try {
-    ctx = new AudioContext({ sampleRate: 48000 });
-  } catch {
-    return;
-  }
+  withContext(playBell);
+}
 
+function playBell(ctx: AudioContext): void {
   // Soft bell tap: two stacked sines (587 Hz + 880 Hz, fifth interval) with
   // exponential decay. Pleasant, salient, no buzz.
   const PEAK_LOW = 0.28;
