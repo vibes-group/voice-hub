@@ -1,22 +1,18 @@
 package sfu
 
 import (
-	"time"
-
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
-	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/interceptor/pkg/nack"
-	"github.com/pion/interceptor/pkg/twcc"
 	"github.com/pion/webrtc/v4"
 
 	"voice-hub/backend/internal/sfu/dd"
 )
 
 // NewRoom creates and configures a Room with audio codecs, screen-share video
-// codecs, and the full interceptor chain (RTCP reports, interval PLI, NACK,
-// GCC bandwidth estimator, TWCC header extension + sender).
+// codecs, and the full interceptor chain (RTCP reports, NACK
+// responder, GCC bandwidth estimator, TWCC header extension + sender).
 func NewRoom(cfg Config) (*Room, error) {
 	settingEngine := webrtc.SettingEngine{}
 	if len(cfg.NAT1To1IPs) > 0 {
@@ -73,22 +69,12 @@ func NewRoom(cfg Config) (*Room, error) {
 	}
 
 	// Stats interceptor skipped — getStats is never consumed server-side.
+	// No interval PLI either: keyframes come from requestKeyframe and relayed
+	// subscriber PLIs, not forced every few seconds.
 	ir := &interceptor.Registry{}
 	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
 		return nil, err
 	}
-	pliFactory, err := intervalpli.NewReceiverInterceptor(
-		intervalpli.GeneratorInterval(3 * time.Second),
-	)
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(pliFactory)
-	nackFactory, err := nack.NewResponderInterceptor()
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(nackFactory)
 
 	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		// NoOpPacer: we only want gcc's BWE estimate (for bwCapTID); the
@@ -123,17 +109,31 @@ func NewRoom(cfg Config) (*Room, error) {
 	//     does not touch the RTP write path.
 	// We need both: HE outboard of cc so cc.OnSent finds the extension,
 	// and Sender so publishers receive TWCC feedback for their own BWE.
+	// NACK responder resends through the writer beneath it, so it goes
+	// outermost: retransmissions get a fresh TWCC seq# and pass through cc.
+	//
+	// Configure* and RegisterFeedback put rtcp-fb/extmap into SDP (else
+	// browsers send no NACK/TWCC), so they run after RegisterCodec.
 	ir.Add(ccFactory)
-	twccHeaderExt, err := twcc.NewHeaderExtensionInterceptor()
+	if err := webrtc.ConfigureTWCCHeaderExtensionSender(mediaEngine, ir); err != nil {
+		return nil, err
+	}
+	if err := webrtc.ConfigureTWCCSender(mediaEngine, ir); err != nil {
+		return nil, err
+	}
+	// NACK responder only, no generator: the SFU renumbers forwarded packets,
+	// so a retransmit pulled from the publisher would arrive with a fresh seq#
+	// and a stale timestamp and repair nothing. No ccm fir either: RTCP relay
+	// rewrites only MediaSSRC, so a forwarded FIR is ignored; browsers use PLI.
+	// 256 packets (default 1024) is still well over one RTT of history and
+	// keeps the per-subscriber-stream buffer small.
+	nackResponder, err := nack.NewResponderInterceptor(nack.ResponderSize(256))
 	if err != nil {
 		return nil, err
 	}
-	ir.Add(twccHeaderExt)
-	twccSender, err := twcc.NewSenderInterceptor()
-	if err != nil {
-		return nil, err
-	}
-	ir.Add(twccSender)
+	mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBNACK}, webrtc.RTPCodecTypeVideo)
+	mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBNACK, Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
+	ir.Add(nackResponder)
 
 	r.api = webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
