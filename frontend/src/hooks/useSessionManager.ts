@@ -611,7 +611,12 @@ export function useSessionManager({
         );
         return;
       }
-      throw err;
+      console.error('[session] screen share start failed:', err);
+      getStore().setStatus(
+        'Не удалось начать демонстрацию экрана. Попробуйте ещё раз.',
+        true,
+        true,
+      );
     }
   }, [sfu, getStore]);
 

@@ -133,12 +133,15 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   let stopped = false;
   let iceServers: RTCIceServer[] = [];
 
+  let selfPeerId: string | null = null;
   let screenPubPC: RTCPeerConnection | null = null;
   let screenPubStream: MediaStream | null = null;
   let screenPubStopped = false;
   let screenPubToken: string | null = null;
   let screenPubVideoSender: RTCRtpSender | null = null;
   let screenPubInitialParams: Promise<void> | null = null;
+  // Aborts a start still waiting on the server, so a stop can't be undone by it.
+  let screenPubAbort: AbortController | null = null;
   let resumeContinuation: {
     resolve: () => void;
     reject: (err: Error) => void;
@@ -295,6 +298,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
   async function handleServerMessage(msg: ServerMessage): Promise<void> {
     switch (msg.event) {
       case 'welcome':
+        selfPeerId = msg.data.id;
         screenShareCodecs.clear();
         for (const peer of msg.data.peers) {
           if (peer.screenSharing && isScreenVideoCodec(peer.screenSharingVideoCodec)) {
@@ -358,6 +362,10 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
         screenShareCodecs.delete(msg.data.publisherId);
         teardownScreenSub(msg.data.publisherId);
         on.onScreenShareEnded(msg.data);
+        // The server ended our current share: drop the local publisher too, or
+        // the next start throws "already publishing". A share without a token
+        // yet is a new one — the ended is the echo of our own earlier stop.
+        if (msg.data.publisherId === selfPeerId && screenPubToken) stopScreenShare();
         break;
       case 'screen-share-error':
         // Best-effort cleanup of the relevant local state. The handler may
@@ -367,6 +375,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
           const cont = resumeContinuation;
           resumeContinuation = null;
           cont.reject(new Error(`screen-share-error: ${msg.data.reason}`));
+        } else if (!msg.data.publisherId) {
+          // Our start was rejected; the UI resets to idle, so must we.
+          stopScreenShare();
         }
         on.onScreenShareError(msg.data);
         break;
@@ -590,6 +601,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     videoTrack: MediaStreamTrack,
     selectedCodec: ScreenVideoCodec,
     pickedParams: ReturnType<typeof getCurrentScreenParams>,
+    signal: AbortSignal,
   ): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -599,6 +611,17 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
           reject(new Error('sfu-client: screen-share answer timeout'));
         }
       }, 10000);
+      signal.addEventListener(
+        'abort',
+        () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(t);
+          newPC.removeEventListener('signalingstatechange', watcher);
+          reject(signal.reason);
+        },
+        { once: true },
+      );
       const watcher = () => {
         if (newPC.signalingState !== 'stable' || settled) return;
         settled = true;
@@ -625,27 +648,6 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       };
       newPC.addEventListener('signalingstatechange', watcher);
     });
-  }
-
-  function teardownNewPubPC(newPC: RTCPeerConnection, stream: MediaStream): void {
-    try {
-      stream.getTracks().forEach((t) => t.stop());
-    } catch {
-      /* ignore */
-    }
-    try {
-      newPC.close();
-    } catch {
-      /* ignore */
-    }
-    if (screenPubPC === newPC) {
-      screenPubPC = null;
-      screenPubStream = null;
-      screenPubVideoSender = null;
-      screenPubInitialParams = null;
-      screenPubStopped = false;
-    }
-    on.onScreenShareSelfStopped();
   }
 
   async function startScreenShare(): Promise<void> {
@@ -683,73 +685,95 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       stream.getTracks().forEach((t) => t.stop());
       throw new Error('sfu-client: getDisplayMedia returned no video track');
     }
-    const pickedSurface = videoTrack.getSettings().displaySurface;
-
-    if (pickedSurface === 'monitor' && stream.getAudioTracks().length > 0) {
-      on.onScreenShareSystemAudioWarning({ reason: 'monitor-feedback-risk' });
-    }
-    const shouldBootstrapBrowserMotion =
-      requestedMode === 'motion' && isTabOrWindowSurface(videoTrack);
-    videoTrack.contentHint = shouldBootstrapBrowserMotion ? 'text' : getCurrentScreenContentHint();
-    await applyScreenCaptureConstraints(
-      videoTrack,
-      shouldBootstrapBrowserMotion ? bootstrapParams : pickedParams,
-    );
-
-    const audioTrack = stream.getAudioTracks()[0];
-    const hasSystemAudio = !!audioTrack;
-
-    const newPC = new RTCPeerConnection({ iceServers });
-    screenPubPC = newPC;
-    screenPubStream = stream;
-    screenPubStopped = false;
-    on.onScreenShareSelfStarted({ stream, videoCodec: selectedCodec });
-
-    const videoSender = newPC.addTrack(videoTrack, stream);
-    screenPubVideoSender = videoSender;
-    if (audioTrack) newPC.addTrack(audioTrack, stream);
-
-    const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
-    if (tx) {
-      applyScreenCodecPreferences(tx, caps, selectedCodec);
-    }
-
-    newPC.addEventListener('icecandidate', (ev) => {
-      if (!ev.candidate || screenPubStopped) return;
-      const cand = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
-      send('candidate', { pc: 'screen-pub', ...cand });
-    });
-
-    newPC.addEventListener('connectionstatechange', () => {
-      if (newPC.connectionState === 'failed' || newPC.connectionState === 'closed') {
-        if (!screenPubStopped) stopScreenShare();
-      }
-    });
-
-    videoTrack.addEventListener('ended', () => {
-      if (!screenPubStopped) stopScreenShare();
-    });
-
-    const offer = await newPC.createOffer();
-    await newPC.setLocalDescription(offer);
-
-    send('screen-share-start', {
-      sdp: offer.sdp ?? '',
-      hasSystemAudio,
-      mode: requestedMode,
-    });
-
+    // Any failure past this point must release the capture and the publisher
+    // PC: a leftover screenPubPC makes every later start throw "already
+    // publishing" while the UI shows the share as off.
+    const abort = new AbortController();
     try {
-      await applyInitialEncoderParams(newPC, videoSender, videoTrack, selectedCodec, pickedParams);
+      const pickedSurface = videoTrack.getSettings().displaySurface;
+
+      if (pickedSurface === 'monitor' && stream.getAudioTracks().length > 0) {
+        on.onScreenShareSystemAudioWarning({ reason: 'monitor-feedback-risk' });
+      }
+      const shouldBootstrapBrowserMotion =
+        requestedMode === 'motion' && isTabOrWindowSurface(videoTrack);
+      videoTrack.contentHint = shouldBootstrapBrowserMotion
+        ? 'text'
+        : getCurrentScreenContentHint();
+      await applyScreenCaptureConstraints(
+        videoTrack,
+        shouldBootstrapBrowserMotion ? bootstrapParams : pickedParams,
+      );
+
+      const audioTrack = stream.getAudioTracks()[0];
+      const hasSystemAudio = !!audioTrack;
+
+      const newPC = new RTCPeerConnection({ iceServers });
+      screenPubPC = newPC;
+      screenPubAbort = abort;
+      screenPubStream = stream;
+      screenPubStopped = false;
+      on.onScreenShareSelfStarted({ stream, videoCodec: selectedCodec });
+
+      const videoSender = newPC.addTrack(videoTrack, stream);
+      screenPubVideoSender = videoSender;
+      if (audioTrack) newPC.addTrack(audioTrack, stream);
+
+      const tx = newPC.getTransceivers().find((t) => t.sender === videoSender);
+      if (tx) {
+        applyScreenCodecPreferences(tx, caps, selectedCodec);
+      }
+
+      newPC.addEventListener('icecandidate', (ev) => {
+        if (!ev.candidate || screenPubStopped) return;
+        const cand = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
+        send('candidate', { pc: 'screen-pub', ...cand });
+      });
+
+      newPC.addEventListener('connectionstatechange', () => {
+        if (newPC.connectionState === 'failed' || newPC.connectionState === 'closed') {
+          if (!screenPubStopped) stopScreenShare();
+        }
+      });
+
+      videoTrack.addEventListener('ended', () => {
+        if (!screenPubStopped) stopScreenShare();
+      });
+
+      const offer = await newPC.createOffer();
+      await newPC.setLocalDescription(offer);
+      abort.signal.throwIfAborted();
+
+      send('screen-share-start', {
+        sdp: offer.sdp ?? '',
+        hasSystemAudio,
+        mode: requestedMode,
+      });
+
+      await applyInitialEncoderParams(
+        newPC,
+        videoSender,
+        videoTrack,
+        selectedCodec,
+        pickedParams,
+        abort.signal,
+      );
       finishTabOrWindowMotionBootstrap(videoTrack, videoSender, pickedParams, requestedMode);
     } catch (err) {
-      teardownNewPubPC(newPC, stream);
+      stream.getTracks().forEach((t) => t.stop());
+      // Still ours → full stop (tells the server, resets the UI). Otherwise a
+      // stop already ran, and a newer share may own the state now.
+      if (screenPubAbort === abort) stopScreenShare();
       throw err;
+    } finally {
+      if (screenPubAbort === abort) screenPubAbort = null;
     }
   }
 
   function stopScreenShare(): void {
     if (!screenPubPC) return;
+    screenPubAbort?.abort(new DOMException('Screen share stopped', 'AbortError'));
+    screenPubAbort = null;
     screenPubStopped = true;
     send('screen-share-stop', {});
     try {
