@@ -6,5 +6,5 @@ rules:
         vibes-group/*: ref-pin
         "*": hash-pin
   self-repository:
-    # `./.github/actions/...` here points into a checkout of vibes-group/infra, not this repo.
+    # `./.github/actions/...` here points into a checkout of vibes-group/deploy, not this repo.
     disable: true
