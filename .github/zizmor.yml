@@ -1,0 +1,10 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # This org's own reusable workflows and actions track master on purpose.
+        vibes-group/*: ref-pin
+        "*": hash-pin
+  self-repository:
+    # `./.github/actions/...` here points into a checkout of vibes-group/infra, not this repo.
+    disable: true

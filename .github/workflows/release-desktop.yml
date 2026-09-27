@@ -23,16 +23,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      # This job holds the updater signing key, so it restores no caches: any branch can write them.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          node-version: '24.21.0'
+          package-manager-cache: false
 
       - name: Build frontend
         working-directory: frontend
@@ -40,13 +41,10 @@ jobs:
           npm ci
           npm run build
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master (no tags upstream)
         with:
+          toolchain: 1.98.1
           targets: ${{ env.DESKTOP_TARGET }}
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - name: Test desktop shell
         working-directory: src-tauri
@@ -55,9 +53,11 @@ jobs:
       - name: Resolve tag
         id: tag
         shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ inputs.tag }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
           else
             tag="${GITHUB_REF#refs/tags/}"
           fi
@@ -111,7 +111,7 @@ jobs:
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -133,10 +133,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vibes-group/infra
           ref: master
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-ssh
         with:
@@ -165,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           tar -C mirror -czf - . | ssh "deploy@$DEPLOY_HOST" \
-            'docker run --rm -i -v voice-hub-updates:/updates busybox:1.37 sh -eu -c '\''
+            'docker run --rm -i -v voice-hub-updates:/updates busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e sh -eu -c '\''
               stage=$(mktemp -d)
               trap "rm -rf $stage" EXIT
               tar -xzf - -C "$stage"
