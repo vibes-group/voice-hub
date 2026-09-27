@@ -58,20 +58,29 @@ func (r *Room) forwardRTCPToPublisher(
 // sender to the publisher's PC and harvests ReceiverReport.FractionLost into
 // sub.lossPerMille for the auto-downgrade loop.
 func (r *Room) forwardScreenVideoRTCPToPublisher(session *ScreenShareSession, sub *screenSubscriber, sender *webrtc.RTPSender) {
+	rtxSSRC := uint32(sender.GetParameters().Encodings[0].RTX.SSRC)
 	r.forwardRTCPToPublisher(session, sender, func(p *rtcp.ReceiverReport) {
-		if len(p.Reports) > 0 {
-			// A compound RR may carry blocks for both video and audio SSRCs
-			// (RFC 3550 §6.4.1). Take the worst loss across all blocks —
-			// conservative bias toward downgrade when any leg is hurting.
-			var worst uint8
-			for _, rep := range p.Reports {
-				if rep.FractionLost > worst {
-					worst = rep.FractionLost
-				}
-			}
+		if worst, ok := worstFractionLost(p, rtxSSRC); ok {
 			// FractionLost is fixed-point /256 (RFC 3550 §6.4.1) — convert
 			// to per-mille for the int comparisons in the decision loop.
 			sub.lossPerMille.Store(uint32(worst) * 1000 / 256)
 		}
 	})
+}
+
+// worstFractionLost returns the worst loss across the report blocks of p.
+// A compound RR may carry blocks for both video and audio SSRCs (RFC 3550
+// §6.4.1); the worst is a conservative bias toward downgrade when any leg is
+// hurting. The RTX block is skipped: pion's NACK responder takes an RTX seq#
+// for every buffered packet, not every sent one, so that block reports near
+// total loss. ok is false when no block is left.
+func worstFractionLost(p *rtcp.ReceiverReport, rtxSSRC uint32) (worst uint8, ok bool) {
+	for _, rep := range p.Reports {
+		if rtxSSRC != 0 && rep.SSRC == rtxSSRC {
+			continue
+		}
+		ok = true
+		worst = max(worst, rep.FractionLost)
+	}
+	return worst, ok
 }

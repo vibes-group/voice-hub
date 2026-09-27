@@ -27,12 +27,15 @@ import (
 // because OnConnectionStateChange acquires s.mu while holding pc internals.
 func (s *ScreenShareSession) forwardVideo(remote *webrtc.TrackRemote) {
 	for {
-		pkt, _, err := remote.ReadRTP()
+		pkt, attrs, err := remote.ReadRTP()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Printf("sfu: screen forwardVideo (%s) read: %v", s.PublisherID, err)
 			}
 			return
+		}
+		if !forwardable(pkt, attrs) {
+			continue
 		}
 		desc, parseErr := s.codecAdapter.Parse(pkt)
 		if parseErr != nil {

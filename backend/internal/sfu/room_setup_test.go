@@ -48,7 +48,7 @@ func TestNewRoomOfferAdvertisesRTCPFeedback(t *testing.T) {
 	}
 	for media, feedback := range want {
 		section := sections[media]
-		pts := payloadTypes(section)
+		pts := mediaPayloadTypes(section)
 		if len(pts) == 0 {
 			t.Fatalf("no %s codecs in offer", media)
 		}
@@ -59,17 +59,59 @@ func TestNewRoomOfferAdvertisesRTCPFeedback(t *testing.T) {
 		}
 		requireExtmap(t, section, transportCCURI)
 	}
+
+	if rtx := rtxPayloadTypes(sections["audio"]); len(rtx) != 0 {
+		t.Errorf("audio offers RTX %v", rtx)
+	}
+	video := sections["video"]
+	rtx := rtxPayloadTypes(video)
+	media := mediaPayloadTypes(video)
+	for _, pt := range media {
+		rtxPT, ok := rtx[pt]
+		if !ok {
+			t.Errorf("no RTX with apt=%s in:\n%s", pt, strings.Join(video, "\n"))
+			continue
+		}
+		requireLine(t, video, "a=rtpmap:"+rtxPT+" rtx/90000")
+		for _, line := range video {
+			if strings.HasPrefix(line, "a=rtcp-fb:"+rtxPT+" ") {
+				t.Errorf("RTX PT %s carries feedback: %q", rtxPT, line)
+			}
+		}
+	}
+	if len(rtx) != len(media) {
+		t.Errorf("RTX apt map %v does not match media PTs %v", rtx, media)
+	}
 }
 
-func payloadTypes(section []string) []string {
+// mediaPayloadTypes returns the non-RTX payload types of an m= section.
+func mediaPayloadTypes(section []string) []string {
 	var pts []string
 	for _, line := range section {
 		if rest, ok := strings.CutPrefix(line, "a=rtpmap:"); ok {
-			pt, _, _ := strings.Cut(rest, " ")
-			pts = append(pts, pt)
+			pt, name, _ := strings.Cut(rest, " ")
+			if !strings.HasPrefix(strings.ToLower(name), "rtx/") {
+				pts = append(pts, pt)
+			}
 		}
 	}
 	return pts
+}
+
+// rtxPayloadTypes maps each apt= target to its RTX payload type.
+func rtxPayloadTypes(section []string) map[string]string {
+	rtx := map[string]string{}
+	for _, line := range section {
+		rest, ok := strings.CutPrefix(line, "a=fmtp:")
+		if !ok {
+			continue
+		}
+		pt, params, _ := strings.Cut(rest, " ")
+		if apt, ok := strings.CutPrefix(params, "apt="); ok {
+			rtx[apt] = pt
+		}
+	}
+	return rtx
 }
 
 func requireLine(t *testing.T, section []string, want string) {

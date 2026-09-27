@@ -1,6 +1,8 @@
 package sfu
 
 import (
+	"fmt"
+
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
@@ -11,7 +13,7 @@ import (
 )
 
 // NewRoom creates and configures a Room with audio codecs, screen-share video
-// codecs, and the full interceptor chain (RTCP reports, NACK
+// codecs with RTX, and the full interceptor chain (RTCP reports, NACK
 // responder, GCC bandwidth estimator, TWCC header extension + sender).
 func NewRoom(cfg Config) (*Room, error) {
 	settingEngine := webrtc.SettingEngine{}
@@ -72,9 +74,6 @@ func NewRoom(cfg Config) (*Room, error) {
 	// No interval PLI either: keyframes come from requestKeyframe and relayed
 	// subscriber PLIs, not forced every few seconds.
 	ir := &interceptor.Registry{}
-	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
-		return nil, err
-	}
 
 	ccFactory, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		// NoOpPacer: we only want gcc's BWE estimate (for bwCapTID); the
@@ -109,12 +108,15 @@ func NewRoom(cfg Config) (*Room, error) {
 	//     does not touch the RTP write path.
 	// We need both: HE outboard of cc so cc.OnSent finds the extension,
 	// and Sender so publishers receive TWCC feedback for their own BWE.
-	// NACK responder resends through the writer beneath it, so it goes
-	// outermost: retransmissions get a fresh TWCC seq# and pass through cc.
+	// NACK responder resends through the writer beneath it, so it wraps
+	// both: retransmissions get a fresh TWCC seq# and pass through cc.
+	// RTCP reports go outermost: the sender-report stream counts every packet
+	// written beneath it regardless of SSRC, and an RTX packet (own seq#, old
+	// timestamp) would skew the SR RTP-time that receivers use for A/V sync.
 	//
 	// Configure* and RegisterFeedback put rtcp-fb/extmap into SDP (else
 	// browsers send no NACK/TWCC), so they run after RegisterCodec.
-	ir.Add(ccFactory)
+	ir.Add(rtxPacerFactory{ccFactory})
 	if err := webrtc.ConfigureTWCCHeaderExtensionSender(mediaEngine, ir); err != nil {
 		return nil, err
 	}
@@ -134,6 +136,27 @@ func NewRoom(cfg Config) (*Room, error) {
 	mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBNACK}, webrtc.RTPCodecTypeVideo)
 	mediaEngine.RegisterFeedback(webrtc.RTCPFeedback{Type: webrtc.TypeRTCPFBNACK, Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
 	ir.Add(nackResponder)
+	if err := webrtc.ConfigureRTCPReports(ir); err != nil {
+		return nil, err
+	}
+
+	// RTX after RegisterFeedback, which applies to every codec registered so
+	// far: RTX streams take no feedback (RFC 4588 §6.3). Retransmits to
+	// subscribers go on the RTX SSRC; if a publisher negotiates RTX too,
+	// forwardable drops what it sends there.
+	for _, c := range []struct{ pt, apt webrtc.PayloadType }{{46, 45}, {99, 98}} {
+		if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypeRTX,
+				ClockRate: 90000,
+				// Exactly "apt=N": pion looks the RTX PT up by string equality.
+				SDPFmtpLine: fmt.Sprintf("apt=%d", c.apt),
+			},
+			PayloadType: c.pt,
+		}, webrtc.RTPCodecTypeVideo); err != nil {
+			return nil, err
+		}
+	}
 
 	r.api = webrtc.NewAPI(
 		webrtc.WithSettingEngine(settingEngine),
