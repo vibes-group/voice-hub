@@ -8,7 +8,7 @@
 // Example:
 //
 //	# server side
-//	APP_ADMIN_PASSWORD=<admin-password> PUBLIC_IP=127.0.0.1 \
+//	APP_ADMIN_PASSWORD_HASH='<go run ./cmd/hashpass>' PUBLIC_IP=127.0.0.1 \
 //	    go run ./cmd/server
 //
 //	# loadtest side (separate terminal)

@@ -12,7 +12,8 @@ services:
       APP_WEB_DIR: "/app/web"
       APP_HOSTNAME: "localhost"
       PUBLIC_IP: "127.0.0.1"
-      APP_ADMIN_PASSWORD: "dev"
+      # Hash of the password "dev" (`$$` escapes `$` for compose); from cmd/hashpass.
+      APP_ADMIN_PASSWORD_HASH: "argon2id$$t=2$$m=65536$$p=1$$W0B0JKkfebAQccnLyxFLzQ$$iIyiymTL21B6cCp53xsGzI/Vjm8v7V91UdNdoJvHt5w"
       APP_COOKIE_SECURE: "false"
       APP_ALLOW_INSECURE: "1"
     volumes:

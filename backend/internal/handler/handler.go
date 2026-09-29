@@ -5,7 +5,6 @@ package handler
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -104,21 +103,20 @@ func Version(version string) http.HandlerFunc {
 
 // LoginConfig groups dependencies and options for the Login handler factory.
 type LoginConfig struct {
-	AdminPassword string
-	AdminVer      string
-	CookieSecure  bool
-	SessionSecret []byte
-	ConnPass      *auth.ConnPassStore
-	Limiter       *auth.AuthLimiter
-	Trusted       []netip.Prefix
+	AdminPasswordHash string
+	AdminVer          string
+	CookieSecure      bool
+	SessionSecret     []byte
+	ConnPass          *auth.ConnPassStore
+	Limiter           *auth.AuthLimiter
+	Trusted           []netip.Prefix
 }
 
-// Login handles POST /api/login. It checks the admin password first (constant-time),
+// Login handles POST /api/login. It checks the admin password hash first,
 // then the connection password, and issues a signed session cookie on success.
 // trusted is the proxy CIDR list — it controls which RemoteAddr values are
 // allowed to set X-Forwarded-For for rate-limit keying.
 func Login(cfg LoginConfig) http.HandlerFunc {
-	wantAdmin := []byte(cfg.AdminPassword)
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := middleware.ClientIP(r, cfg.Trusted)
 		if cfg.Limiter.Blocked(ip) {
@@ -137,8 +135,8 @@ func Login(cfg LoginConfig) http.HandlerFunc {
 			return
 		}
 
-		// Admin first; constant-time compare to avoid timing leak on length.
-		if subtle.ConstantTimeCompare([]byte(pass), wantAdmin) == 1 {
+		// Admin first.
+		if auth.VerifyPassword(cfg.AdminPasswordHash, pass) {
 			cfg.Limiter.Success(ip)
 			auth.SetSessionCookie(w, cfg.CookieSecure, cfg.SessionSecret, auth.RoleAdmin, 0, cfg.AdminVer, "")
 			w.WriteHeader(http.StatusNoContent)

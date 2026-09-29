@@ -226,7 +226,7 @@ func TestDisconnectUsersCancelsOnlyUserConnections(t *testing.T) {
 	waitFor(admin.exited, "admin handler exit on server close")
 }
 
-// A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD) must be
+// A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD_HASH) must be
 // rejected by the broad RequireAuthAPI gate, not only by RequireAdmin —
 // otherwise it could still reach /api/config and /ws endpoints.
 func TestRequireAuthAPIRejectsStaleAdminCookie(t *testing.T) {

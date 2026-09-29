@@ -150,7 +150,7 @@ jobs:
             IMAGE_TAG=${{ needs.build.outputs.image_tag }}
             APP_HOSTNAME=${{ secrets.VOICE_HUB_HOST }}
             PUBLIC_IP=${{ secrets.DEPLOY_HOST }}
-            APP_ADMIN_PASSWORD=${{ secrets.APP_ADMIN_PASSWORD }}
+            APP_ADMIN_PASSWORD_HASH='${{ secrets.APP_ADMIN_PASSWORD_HASH }}'
 
   deploy:
     needs: [build, write-env]

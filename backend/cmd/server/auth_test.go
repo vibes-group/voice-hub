@@ -22,6 +22,15 @@ func newTestSecret() []byte {
 	return []byte("0123456789abcdef0123456789abcdef")
 }
 
+func mustHash(t *testing.T, plain string) string {
+	t.Helper()
+	h, err := auth.HashPassword(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 func adminHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -93,7 +102,7 @@ func TestRequireAdmin_AcceptsAdminRole(t *testing.T) {
 	}
 }
 
-// An admin cookie minted under a previous APP_ADMIN_PASSWORD carries a stale
+// An admin cookie minted under a previous APP_ADMIN_PASSWORD_HASH carries a stale
 // AdminVersion fingerprint and must be rejected after restart, so rotating
 // the admin password via redeploy actually invalidates old admin sessions.
 func TestRequireAdmin_RejectsStaleAdminVersion(t *testing.T) {
@@ -140,13 +149,13 @@ func TestLogin_AdminPasswordYieldsAdminRole(t *testing.T) {
 	limiter := auth.NewAuthLimiter(100, time.Minute)
 
 	srv := httptest.NewServer(handler.Login(handler.LoginConfig{
-		AdminPassword: "correct-admin-pass",
-		AdminVer:      "av-test",
-		CookieSecure:  false,
-		SessionSecret: secret,
-		ConnPass:      connPass,
-		Limiter:       limiter,
-		Trusted:       config.DefaultTrustedProxies(),
+		AdminPasswordHash: mustHash(t, "correct-admin-pass"),
+		AdminVer:          "av-test",
+		CookieSecure:      false,
+		SessionSecret:     secret,
+		ConnPass:          connPass,
+		Limiter:           limiter,
+		Trusted:           config.DefaultTrustedProxies(),
 	}))
 	defer srv.Close()
 
@@ -172,13 +181,13 @@ func TestLogin_ConnPassYieldsUserRole(t *testing.T) {
 
 	limiter := auth.NewAuthLimiter(100, time.Minute)
 	srv := httptest.NewServer(handler.Login(handler.LoginConfig{
-		AdminPassword: "correct-admin-pass",
-		AdminVer:      "av-test",
-		CookieSecure:  false,
-		SessionSecret: secret,
-		ConnPass:      connPass,
-		Limiter:       limiter,
-		Trusted:       config.DefaultTrustedProxies(),
+		AdminPasswordHash: mustHash(t, "correct-admin-pass"),
+		AdminVer:          "av-test",
+		CookieSecure:      false,
+		SessionSecret:     secret,
+		ConnPass:          connPass,
+		Limiter:           limiter,
+		Trusted:           config.DefaultTrustedProxies(),
 	}))
 	defer srv.Close()
 
@@ -202,13 +211,13 @@ func TestLogin_GuestCannotEscalateByGuessingAdmin(t *testing.T) {
 
 	limiter := auth.NewAuthLimiter(100, time.Minute)
 	srv := httptest.NewServer(handler.Login(handler.LoginConfig{
-		AdminPassword: "correct-admin-pass",
-		AdminVer:      "av-test",
-		CookieSecure:  false,
-		SessionSecret: secret,
-		ConnPass:      connPass,
-		Limiter:       limiter,
-		Trusted:       config.DefaultTrustedProxies(),
+		AdminPasswordHash: mustHash(t, "correct-admin-pass"),
+		AdminVer:          "av-test",
+		CookieSecure:      false,
+		SessionSecret:     secret,
+		ConnPass:          connPass,
+		Limiter:           limiter,
+		Trusted:           config.DefaultTrustedProxies(),
 	}))
 	defer srv.Close()
 
@@ -285,7 +294,7 @@ func TestAuthenticated_AdminUnaffectedByRotate(t *testing.T) {
 	}
 }
 
-// A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD) must be
+// A stale admin cookie (issued under a previous APP_ADMIN_PASSWORD_HASH) must be
 // rejected by the broad Authenticated check, not only by RequireAdmin —
 // otherwise it could still reach /api/config and /ws endpoints.
 func TestAuthenticated_StaleAdminVersionRejected(t *testing.T) {

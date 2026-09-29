@@ -111,7 +111,7 @@ func RequireAuthAPI(secret []byte, connPass *auth.ConnPassStore, adminVer string
 
 // RequireAdmin gates a handler behind a valid admin-role session whose
 // embedded AdminVersion matches adminVer. Mismatch -> 403, so rotating
-// APP_ADMIN_PASSWORD via redeploy invalidates every old admin cookie.
+// APP_ADMIN_PASSWORD_HASH via redeploy invalidates every old admin cookie.
 func RequireAdmin(secret []byte, adminVer string, next http.Handler) http.Handler {
 	want := []byte(adminVer)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

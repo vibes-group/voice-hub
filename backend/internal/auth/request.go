@@ -28,7 +28,7 @@ func SessionFromRequest(secret []byte, r *http.Request) (Session, bool) {
 // User sessions are rejected when their recorded ConnPass entry no longer
 // exists or its generation has bumped. Admin sessions are rejected when their
 // recorded AdminVersion no longer matches adminVer — so rotating
-// APP_ADMIN_PASSWORD invalidates stale admin cookies on every gated route,
+// APP_ADMIN_PASSWORD_HASH invalidates stale admin cookies on every gated route,
 // not just the admin-only ones.
 func Authenticated(secret []byte, connPass *ConnPassStore, adminVer string, r *http.Request) bool {
 	sess, ok := SessionFromRequest(secret, r)

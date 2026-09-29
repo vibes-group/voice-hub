@@ -1,6 +1,10 @@
 package config
 
-import "errors"
+import (
+	"errors"
+
+	"voice-hub/backend/internal/auth"
+)
 
 // ValidateInsecureConfig refuses combinations that are only acceptable in a
 // local dev container. allowInsecure is the boot-time `APP_ALLOW_INSECURE=1`
@@ -14,7 +18,7 @@ func ValidateInsecureConfig(cfg *Config, allowInsecure bool) error {
 	if !cfg.CookieSecure && !allowInsecure {
 		return errors.New("APP_COOKIE_SECURE=false requires APP_ALLOW_INSECURE=1")
 	}
-	if cfg.AdminPassword == "dev" && !allowInsecure {
+	if !allowInsecure && auth.VerifyPassword(cfg.AdminPasswordHash, "dev") {
 		return errors.New("dev admin password requires APP_ALLOW_INSECURE=1")
 	}
 	return nil

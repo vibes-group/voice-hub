@@ -53,8 +53,11 @@ func main() {
 		log.Printf("WARNING: APP_ALLOW_INSECURE=1 — insecure dev mode active, do not expose publicly")
 	}
 
-	if cfg.AdminPassword == "" {
-		log.Fatal("APP_ADMIN_PASSWORD must be set")
+	if cfg.AdminPasswordHash == "" {
+		log.Fatal("APP_ADMIN_PASSWORD_HASH must be set (generate: go run ./cmd/hashpass)")
+	}
+	if !auth.ValidPasswordHash(cfg.AdminPasswordHash) {
+		log.Fatal("APP_ADMIN_PASSWORD_HASH is not an argon2id hash from cmd/hashpass (in a compose .env, wrap it in single quotes)")
 	}
 	if cfg.PublicIP == "" {
 		log.Fatal("PUBLIC_IP must be set (used by SFU NAT mapping and TURN relay address)")
@@ -92,9 +95,9 @@ func main() {
 	// below have stopped all traffic into the store.
 	defer fileStore.Close()
 
-	// Sealed into admin cookies; rotating APP_ADMIN_PASSWORD requires restart,
+	// Sealed into admin cookies; rotating APP_ADMIN_PASSWORD_HASH requires restart,
 	// so any old admin cookie's AdminVersion will mismatch this and be rejected.
-	adminVer := auth.AdminPasswordVersion(sessionSecret, cfg.AdminPassword)
+	adminVer := auth.AdminPasswordVersion(sessionSecret, cfg.AdminPasswordHash)
 	wsRegistry := auth.NewWSRegistry()
 
 	limiter := auth.NewAuthLimiter(10, 15*time.Minute)
@@ -317,13 +320,13 @@ func wireRoutes(
 	mux.HandleFunc("GET /healthz", handler.Health())
 	mux.HandleFunc("GET /api/version", handler.Version(version))
 	mux.HandleFunc("POST /api/login", handler.Login(handler.LoginConfig{
-		AdminPassword: cfg.AdminPassword,
-		AdminVer:      adminVer,
-		CookieSecure:  cfg.CookieSecure,
-		SessionSecret: cfg.SessionSecret,
-		ConnPass:      connPass,
-		Limiter:       limiter,
-		Trusted:       cfg.TrustedProxies,
+		AdminPasswordHash: cfg.AdminPasswordHash,
+		AdminVer:          adminVer,
+		CookieSecure:      cfg.CookieSecure,
+		SessionSecret:     cfg.SessionSecret,
+		ConnPass:          connPass,
+		Limiter:           limiter,
+		Trusted:           cfg.TrustedProxies,
 	}))
 	mux.HandleFunc("POST /api/logout", handler.Logout(cfg.CookieSecure))
 	mux.Handle("GET /api/presence", middleware.RequireAuthAPI(cfg.SessionSecret, connPass, adminVer,

@@ -2,8 +2,6 @@ package auth
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,20 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/argon2"
 )
 
-// argon2id parameters tuned for an interactive login: ~50ms on a modern core,
-// 64 MiB memory. The connection password itself has ~140 bits of entropy,
-// so the hash is mostly defense-in-depth in case the data file leaks.
 const (
-	argonTime    uint32 = 2
-	argonMemory  uint32 = 64 * 1024 // KiB
-	argonThreads uint8  = 1
-	argonKeyLen  uint32 = 32
-	argonSaltLen        = 16
-
 	connPassFile = "connection-password.json"
 
 	// MaxConnPassEntries caps the number of simultaneous connection passwords.
@@ -45,7 +32,7 @@ var ErrTooManyEntries = errors.New("connpass: too many entries")
 
 // connPassDummyHash is burned on no-match so timing doesn't reveal "no entries" vs "wrong password".
 var connPassDummyHash = func() string {
-	h, _ := hashArgon2id("dummy-for-constant-time-verify")
+	h, _ := HashPassword("dummy-for-constant-time-verify")
 	return h
 }()
 
@@ -166,11 +153,11 @@ func (s *ConnPassStore) Verify(plain string) (string, uint64, bool) {
 		if e.IsExpired(now) {
 			continue
 		}
-		if verifyArgon2id(e.Hash, plain) {
+		if VerifyPassword(e.Hash, plain) {
 			return e.ID, e.Generation, true
 		}
 	}
-	_ = verifyArgon2id(connPassDummyHash, plain)
+	_ = VerifyPassword(connPassDummyHash, plain)
 	return "", 0, false
 }
 
@@ -184,7 +171,7 @@ func (s *ConnPassStore) Create(label string, ttl time.Duration) (ConnPassEntrySt
 	if err != nil {
 		return ConnPassEntryStatus{}, "", err
 	}
-	hash, err := hashArgon2id(plain)
+	hash, err := HashPassword(plain)
 	if err != nil {
 		return ConnPassEntryStatus{}, "", err
 	}
@@ -269,7 +256,7 @@ func (s *ConnPassStore) Rotate(id string) (ConnPassEntryStatus, string, error) {
 	if err != nil {
 		return ConnPassEntryStatus{}, "", err
 	}
-	hash, err := hashArgon2id(plain)
+	hash, err := HashPassword(plain)
 	if err != nil {
 		return ConnPassEntryStatus{}, "", err
 	}
@@ -361,46 +348,4 @@ func (s *ConnPassStore) persist(state connPassFileFormat) error {
 		return err
 	}
 	return atomicWrite(s.path, data, 0o600)
-}
-
-func hashArgon2id(plain string) (string, error) {
-	salt := make([]byte, argonSaltLen)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	key := argon2.IDKey([]byte(plain), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-	return fmt.Sprintf(
-		"argon2id$t=%d$m=%d$p=%d$%s$%s",
-		argonTime, argonMemory, argonThreads,
-		base64.RawStdEncoding.EncodeToString(salt),
-		base64.RawStdEncoding.EncodeToString(key),
-	), nil
-}
-
-func verifyArgon2id(encoded, plain string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[0] != "argon2id" {
-		return false
-	}
-	var t, m uint32
-	var p uint8
-	if _, err := fmt.Sscanf(parts[1], "t=%d", &t); err != nil {
-		return false
-	}
-	if _, err := fmt.Sscanf(parts[2], "m=%d", &m); err != nil {
-		return false
-	}
-	if _, err := fmt.Sscanf(parts[3], "p=%d", &p); err != nil {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
-		return false
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
-		return false
-	}
-	got := argon2.IDKey([]byte(plain), salt, t, m, p, uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1
 }

@@ -9,18 +9,19 @@ import (
 )
 
 type Config struct {
-	Addr          string
-	WebDir        string
-	UpdatesDir    string
-	AppHostname   string
-	PublicIP      string
-	TurnRealm     string
-	AdminPassword string
-	CookieSecure  bool
-	UDPPortMin    uint16
-	UDPPortMax    uint16
-	TurnRelayMin  uint16
-	TurnRelayMax  uint16
+	Addr        string
+	WebDir      string
+	UpdatesDir  string
+	AppHostname string
+	PublicIP    string
+	TurnRealm   string
+	// argon2id hash from `go run ./cmd/hashpass`; the plaintext never reaches the host.
+	AdminPasswordHash string
+	CookieSecure      bool
+	UDPPortMin        uint16
+	UDPPortMax        uint16
+	TurnRelayMin      uint16
+	TurnRelayMax      uint16
 	// CIDR prefixes whose RemoteAddr is allowed to set X-Forwarded-For.
 	// Default loopback-only; prod compose pins the docker network range.
 	TrustedProxies []netip.Prefix
@@ -54,19 +55,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		Addr:           env("APP_ADDR", ":8080"),
-		WebDir:         env("APP_WEB_DIR", "../frontend/dist"),
-		UpdatesDir:     env("APP_UPDATES_DIR", "../updates"),
-		AppHostname:    hostname,
-		PublicIP:       os.Getenv("PUBLIC_IP"),
-		TurnRealm:      hostname,
-		AdminPassword:  os.Getenv("APP_ADMIN_PASSWORD"),
-		CookieSecure:   envBool("APP_COOKIE_SECURE", true),
-		UDPPortMin:     envUint16("UDP_PORT_MIN", 10101),
-		UDPPortMax:     envUint16("UDP_PORT_MAX", 10200),
-		TurnRelayMin:   envUint16("TURN_RELAY_PORT_MIN", 49160),
-		TurnRelayMax:   envUint16("TURN_RELAY_PORT_MAX", 49199),
-		TrustedProxies: trusted,
+		Addr:              env("APP_ADDR", ":8080"),
+		WebDir:            env("APP_WEB_DIR", "../frontend/dist"),
+		UpdatesDir:        env("APP_UPDATES_DIR", "../updates"),
+		AppHostname:       hostname,
+		PublicIP:          os.Getenv("PUBLIC_IP"),
+		TurnRealm:         hostname,
+		AdminPasswordHash: os.Getenv("APP_ADMIN_PASSWORD_HASH"),
+		CookieSecure:      envBool("APP_COOKIE_SECURE", true),
+		UDPPortMin:        envUint16("UDP_PORT_MIN", 10101),
+		UDPPortMax:        envUint16("UDP_PORT_MAX", 10200),
+		TurnRelayMin:      envUint16("TURN_RELAY_PORT_MIN", 49160),
+		TurnRelayMax:      envUint16("TURN_RELAY_PORT_MAX", 49199),
+		TrustedProxies:    trusted,
 
 		UploadMaxBytes:   uploadMaxBytes,
 		UploadTempDir:    os.TempDir(),

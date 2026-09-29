@@ -30,7 +30,7 @@ Range pairs: `<NAME>_MIN` / `<NAME>_MAX`. Required vars have no defaults, crash 
 
 - Deploy lives in `vibes-group/deploy`: push to `master` → `build.yml` builds and pushes `ghcr.io/vibes-group/voice-hub-app:<sha>` → its reusable `deploy.yml` rolls it out.
 - Ports: HTTPS/WSS → Caddy → `voice-hub-app:8080`; UDP `3478`, `10101-10200`, `49160-49199` go straight to the app (TURN + media).
-- Secrets: `DEPLOY_HOST` / `DEPLOY_SSH_KEY` / `DEPLOY_HOST_KEY` (org — deploy reusable workflow), `VOICE_HUB_HOST` (org — public domain, becomes `APP_HOSTNAME`), `APP_ADMIN_PASSWORD` (repo), `TAURI_SIGNING_PRIVATE_KEY` (repo — desktop release signing).
+- Secrets: `DEPLOY_HOST` / `DEPLOY_SSH_KEY` / `DEPLOY_HOST_KEY` (org — deploy reusable workflow), `VOICE_HUB_HOST` (org — public domain, becomes `APP_HOSTNAME`), `APP_ADMIN_PASSWORD_HASH` (repo — argon2id hash from `backend/cmd/hashpass`, never the plaintext), `TAURI_SIGNING_PRIVATE_KEY` (repo — desktop release signing).
 
 ## Desktop releases
 

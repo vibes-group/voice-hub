@@ -27,12 +27,12 @@ type Session struct {
 	EntryID      string // ConnPass entry id at issue time; empty for admin sessions.
 }
 
-// AdminPasswordVersion returns a base64url HMAC fingerprint of password
-// keyed by secret. Plaintext password is never stored in the cookie.
-func AdminPasswordVersion(secret []byte, password string) string {
+// AdminPasswordVersion returns a base64url HMAC fingerprint of the admin
+// password hash keyed by secret. The hash itself is never stored in the cookie.
+func AdminPasswordVersion(secret []byte, passwordHash string) string {
 	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte("admin-password:v1:"))
-	mac.Write([]byte(password))
+	mac.Write([]byte("admin-password:v2:"))
+	mac.Write([]byte(passwordHash))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
