@@ -1,6 +1,6 @@
 module voice-hub/backend
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/coder/websocket v1.8.15
@@ -28,6 +28,6 @@ require (
 	github.com/pion/stun/v4 v4.0.1 // indirect
 	github.com/pion/transport/v5 v5.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )

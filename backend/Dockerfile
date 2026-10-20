@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN --mount=type=cache,target=/root/.npm npm run build
 
-FROM golang:1.27-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS build
+FROM golang:1.27-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS build
 
 WORKDIR /src
 
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux \
     go build -ldflags="-s -w" -o /out/voice-hub-app ./cmd/server
 
-FROM debian:13-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 RUN apt-get update \
  && apt-get upgrade -y \
