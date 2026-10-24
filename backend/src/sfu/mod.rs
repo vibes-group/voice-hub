@@ -30,7 +30,7 @@ use crate::presence::Hub;
 use crate::util::{hex, random_bytes, ulid, unix_millis};
 use audio::{AudioPeer, AudioTrack};
 use net::{Mux, Pc};
-use protocol::{Envelope, PeerInfo, ScreenVideoCodec, envelope};
+use protocol::{Envelope, PeerInfo, envelope};
 use screen::ScreenSession;
 
 /// Per-peer outbound queue depth. Broadcasts never wait on a slow socket: a
@@ -50,9 +50,9 @@ pub struct RoomConfig {
     /// "localhost" enables dev Origin wildcards; otherwise only this host.
     pub app_hostname: String,
     pub mux: Arc<Mux>,
-    pub presence: Option<Arc<Hub>>,
-    /// Backs chat attachments; None disables them.
-    pub files: Option<Arc<filestore::Store>>,
+    pub presence: Arc<Hub>,
+    /// Backs chat attachments.
+    pub files: Arc<filestore::Store>,
 }
 
 pub struct Room {
@@ -65,7 +65,7 @@ pub struct Room {
 #[derive(Default)]
 struct State {
     peers: HashMap<String, Entry>,
-    /// Keyed by `track_key(owner, kind)`.
+    /// Microphone tracks by owner peer ID.
     tracks: HashMap<String, Arc<AudioTrack>>,
     /// Live screen sessions by resume token (opaque secret = ownership proof).
     sessions_by_token: HashMap<String, Arc<ScreenSession>>,
@@ -83,9 +83,6 @@ struct Entry {
     screen_session: Option<Arc<ScreenSession>>,
     /// This peer's subscriber PCs, keyed by publisher peer ID.
     screen_subs: HashMap<String, Arc<screen::ScreenSub>>,
-    screen_sharing: bool,
-    screen_sharing_has_audio: bool,
-    screen_sharing_video_codec: Option<ScreenVideoCodec>,
 }
 
 impl Entry {
@@ -97,9 +94,9 @@ impl Entry {
             self_muted: self.self_muted,
             deafened: self.deafened,
             chat_only: self.peer.chat_only,
-            screen_sharing: self.screen_sharing,
-            screen_sharing_has_audio: self.screen_sharing_has_audio,
-            screen_sharing_video_codec: self.screen_sharing_video_codec,
+            screen_sharing: self.screen_session.is_some(),
+            screen_sharing_has_audio: self.screen_session.as_ref().is_some_and(|s| s.has_system_audio),
+            screen_sharing_video_codec: self.screen_session.as_ref().map(|s| s.video_codec()),
         }
     }
 }
@@ -133,7 +130,7 @@ impl Peer {
     }
 
     fn send_event<T: serde::Serialize>(&self, event: &str, data: &T) {
-        self.send(&Utf8Bytes::from(envelope(event, data)));
+        self.send(&msg(event, data));
     }
 }
 
@@ -145,11 +142,6 @@ fn broadcast(peers: &[Arc<Peer>], m: &Utf8Bytes) {
     for p in peers {
         p.send(m);
     }
-}
-
-/// Doubles as map key; the kind suffix tells a publisher's tracks apart.
-fn track_key(owner: &str, kind: &str) -> String {
-    format!("{owner}:{kind}")
 }
 
 fn new_peer_id() -> String {
@@ -180,6 +172,10 @@ impl Room {
         self.state.lock().unwrap().peers.values().map(Entry::info).collect()
     }
 
+    fn peer_handle(&self, id: &str) -> Option<Arc<Peer>> {
+        self.state.lock().unwrap().peers.get(id).map(|e| e.peer.clone())
+    }
+
     fn others(st: &State, exclude: &str) -> Vec<Arc<Peer>> {
         st.peers.values().filter(|e| e.peer.id != exclude).map(|e| e.peer.clone()).collect()
     }
@@ -188,32 +184,19 @@ impl Room {
         st.peers.values().map(|e| e.peer.clone()).collect()
     }
 
-    fn presence_joined(&self, info: &PeerInfo) {
-        if let Some(h) = &self.cfg.presence {
-            h.peer_joined(&self.cfg.room_id, info);
-        }
-    }
-
-    fn presence_left(&self, id: &str) {
-        if let Some(h) = &self.cfg.presence {
-            h.peer_left(&self.cfg.room_id, id);
-        }
-    }
-
     fn presence_updated(&self, info: &PeerInfo) {
-        if let Some(h) = &self.cfg.presence {
-            h.peer_updated(&self.cfg.room_id, info);
-        }
+        self.cfg.presence.peer_updated(&self.cfg.room_id, info);
     }
 
     /// Runs one peer session on an upgraded WebSocket.
     pub async fn serve_ws(self: Arc<Self>, ws: WebSocket, conn_cancel: CancellationToken) {
         let (mut sink, mut stream) = ws.split();
         let cancel = conn_cancel.child_token();
+        let pong = Arc::new(Mutex::new(Instant::now()));
 
         // The first message must be `hello`, so the peer joins with its name
         // and the join broadcast doesn't race a follow-up rename.
-        let first = tokio::time::timeout(HELLO_TIMEOUT, next_data(&mut stream)).await;
+        let first = tokio::time::timeout(HELLO_TIMEOUT, next_frame(&mut stream, &pong)).await;
         let raw = match first {
             Ok(Some(raw)) => raw,
             Ok(None) => {
@@ -248,7 +231,6 @@ impl Room {
         };
 
         let (tx, rx) = mpsc::channel(PEER_OUT_BUF_LEN);
-        let pong = Arc::new(Mutex::new(Instant::now()));
         let writer = tokio::spawn(write_loop(sink, rx, cancel.clone(), pong.clone(), self.me.clone()));
 
         let id = new_peer_id();
@@ -295,7 +277,7 @@ impl Room {
                 let ids: Vec<String> = st.peers.values().filter(|e| e.peer.client_id == p.client_id).map(|e| e.peer.id.clone()).collect();
                 for id in ids {
                     if let Some(e) = st.peers.remove(&id) {
-                        st.tracks.retain(|k, _| owner_of(k) != id);
+                        st.tracks.remove(&id);
                         evicted.push(e);
                     }
                 }
@@ -311,9 +293,6 @@ impl Room {
                 last_renegotiate: None,
                 screen_session: None,
                 screen_subs: HashMap::new(),
-                screen_sharing: false,
-                screen_sharing_has_audio: false,
-                screen_sharing_video_codec: None,
             };
             let info = entry.info();
             st.peers.insert(p.id.clone(), entry);
@@ -336,16 +315,16 @@ impl Room {
             self.signal_all();
         }
         for ev in &evicted {
-            self.presence_left(&ev.peer.id);
+            self.cfg.presence.peer_left(&self.cfg.room_id, &ev.peer.id);
         }
-        self.presence_joined(&info);
+        self.cfg.presence.peer_joined(&self.cfg.room_id, &info);
     }
 
     fn remove_peer(&self, id: &str) {
         let (entry, others, count) = {
             let mut st = self.state.lock().unwrap();
             let Some(e) = st.peers.remove(id) else { return };
-            st.tracks.retain(|k, _| owner_of(k) != id);
+            st.tracks.remove(id);
             (e, Self::all(&st), st.peers.len())
         };
         // Close our subscriber PCs outside the room lock.
@@ -362,7 +341,7 @@ impl Room {
         if !entry.peer.chat_only {
             self.signal_all();
         }
-        self.presence_left(id);
+        self.cfg.presence.peer_left(&self.cfg.room_id, id);
     }
 
     /// Stops accepting peers and tears down every session.
@@ -588,9 +567,8 @@ impl Room {
         if atts.len() > protocol::CHAT_MAX_ATTACHMENTS {
             return false;
         }
-        let Some(files) = &self.cfg.files else { return false };
         atts.iter().all(|a| {
-            !a.upload_id.is_empty() && !a.mime.is_empty() && files.get(&a.upload_id).is_some_and(|e| e.room_id == self.cfg.room_id)
+            !a.upload_id.is_empty() && !a.mime.is_empty() && self.cfg.files.get(&a.upload_id).is_some_and(|e| e.room_id == self.cfg.room_id)
         })
     }
 
@@ -628,15 +606,15 @@ impl Room {
     }
 
     fn publish_track(&self, track: Arc<AudioTrack>) {
-        self.state.lock().unwrap().tracks.insert(track.key.clone(), track);
+        self.state.lock().unwrap().tracks.insert(track.owner.clone(), track);
         self.signal_all_async();
     }
 
-    fn unpublish_track(&self, key: &str, track: &Arc<AudioTrack>) {
+    fn unpublish_track(&self, track: &Arc<AudioTrack>) {
         let removed = {
             let mut st = self.state.lock().unwrap();
-            match st.tracks.get(key) {
-                Some(t) if Arc::ptr_eq(t, track) => st.tracks.remove(key).is_some(),
+            match st.tracks.get(&track.owner) {
+                Some(t) if Arc::ptr_eq(t, track) => st.tracks.remove(&track.owner).is_some(),
                 _ => false,
             }
         };
@@ -644,10 +622,6 @@ impl Room {
             self.signal_all_async();
         }
     }
-}
-
-fn owner_of(key: &str) -> &str {
-    key.split_once(':').map(|(o, _)| o).filter(|o| !o.is_empty()).unwrap_or(key)
 }
 
 fn add_remote_candidate(pc: &Arc<Pc>, candidate: &str) {
@@ -662,22 +636,7 @@ fn add_remote_candidate(pc: &Arc<Pc>, candidate: &str) {
     }
 }
 
-/// Next data message (text or binary), skipping control frames.
-async fn next_data<S>(stream: &mut S) -> Option<String>
-where
-    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-{
-    while let Some(m) = stream.next().await {
-        match m.ok()? {
-            Message::Text(t) => return Some(t.to_string()),
-            Message::Binary(b) => return Some(String::from_utf8_lossy(&b).into_owned()),
-            Message::Close(_) => return None,
-            _ => {}
-        }
-    }
-    None
-}
-
+/// Next data message (text or binary); records pongs on the way.
 async fn next_frame<S>(stream: &mut S, pong: &Mutex<Instant>) -> Option<String>
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
@@ -746,17 +705,6 @@ async fn write_loop<S>(
         CloseFrame { code: CloseCode::Normal, reason: "".into() }
     };
     let _ = tokio::time::timeout(WRITE_TIMEOUT, sink.send(Message::Close(Some(frame)))).await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn keys() {
-        assert_eq!(owner_of(&track_key("abc", "audio")), "abc");
-        assert_eq!(owner_of("plain"), "plain");
-    }
 }
 
 #[cfg(test)]

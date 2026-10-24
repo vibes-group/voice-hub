@@ -29,27 +29,16 @@ impl std::fmt::Display for Error {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct DecodeTarget {
-    pub spatial_layer: u8,
-    pub temporal_layer: u8,
-    pub active: bool,
-}
-
 /// One DD-bearing packet, projected onto what the forward path uses.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Descriptor {
     pub frame_number: u16,
     pub temporal_layer: u8,
-    pub spatial_layer: u8,
     /// No upstream dependencies; re-arms the chain tracker.
     pub is_keyframe: bool,
-    pub is_last_in_frame: bool,
     pub attaches_structure: bool,
     /// Per chain: frame number minus the previous frame number in that chain.
     pub chain_diffs: Vec<u8>,
-    /// Only set when `attaches_structure`.
-    pub decode_targets: Vec<DecodeTarget>,
 }
 
 struct BitReader<'a> {
@@ -102,11 +91,8 @@ impl BitReader<'_> {
     }
 }
 
-#[derive(Clone)]
 struct Template {
-    spatial: u8,
     temporal: u8,
-    dti: Vec<u8>,
     fdiffs: Vec<u8>,
     chain_diffs: Vec<u8>,
 }
@@ -121,8 +107,6 @@ struct Structure {
 #[derive(Default)]
 pub struct Parser {
     structure: Option<Structure>,
-    active_mask: u32,
-    mask_known: bool,
 }
 
 impl Parser {
@@ -132,8 +116,7 @@ impl Parser {
             return Ok(None);
         }
         let mut br = BitReader { buf: ext, pos: 0 };
-        let _start_of_frame = br.bool()?;
-        let end_of_frame = br.bool()?;
+        br.read(2)?; // start_of_frame, end_of_frame
         let template_id = br.read(6)? as usize;
         let frame_number = br.read(16)? as u16;
 
@@ -151,14 +134,11 @@ impl Parser {
         }
         let attaches = attached.is_some();
         if let Some(s) = attached {
-            self.active_mask = (1u32 << s.num_decode_targets) - 1;
-            self.mask_known = true;
             self.structure = Some(s);
         }
         let s = self.structure.as_ref().ok_or(Error::NoStructure)?;
         if active_dt_present {
-            self.active_mask = br.read(s.num_decode_targets)?;
-            self.mask_known = true;
+            br.read(s.num_decode_targets)?; // active_decode_targets_bitmask
         }
         let idx = (template_id + MAX_TEMPLATES - s.template_id_offset) % MAX_TEMPLATES;
         let tmpl = s.templates.get(idx).ok_or(Error::InvalidTemplate)?;
@@ -188,16 +168,12 @@ impl Parser {
             tmpl.chain_diffs.clone()
         };
 
-        let decode_targets = if attaches { decode_targets(s, self.active_mask, self.mask_known) } else { Vec::new() };
         Ok(Some(Descriptor {
             frame_number,
             temporal_layer: tmpl.temporal,
-            spatial_layer: tmpl.spatial,
             is_keyframe: fdiff_count == 0,
-            is_last_in_frame: end_of_frame,
             attaches_structure: attaches,
             chain_diffs,
-            decode_targets,
         }))
     }
 }
@@ -212,7 +188,7 @@ fn parse_structure(br: &mut BitReader) -> Result<Structure, Error> {
         if templates.len() >= MAX_TEMPLATES {
             return Err(Error::TooManyTemplates);
         }
-        templates.push(Template { spatial, temporal, dti: Vec::new(), fdiffs: Vec::new(), chain_diffs: Vec::new() });
+        templates.push(Template { temporal, fdiffs: Vec::new(), chain_diffs: Vec::new() });
         let idc = br.read(2)?;
         match idc {
             1 => temporal += 1,
@@ -227,8 +203,8 @@ fn parse_structure(br: &mut BitReader) -> Result<Structure, Error> {
         }
     }
     let spatial_layers = spatial as usize + 1;
-    for t in &mut templates {
-        t.dti = (0..num_decode_targets).map(|_| br.read(2).map(|v| v as u8)).collect::<Result<_, _>>()?;
+    for _ in 0..templates.len() * num_decode_targets {
+        br.read(2)?; // decode target indications
     }
     for t in &mut templates {
         while br.bool()? {
@@ -253,20 +229,6 @@ fn parse_structure(br: &mut BitReader) -> Result<Structure, Error> {
         }
     }
     Ok(Structure { template_id_offset, num_decode_targets, num_chains, templates })
-}
-
-/// Per target, the highest (spatial, temporal) with a present DTI.
-fn decode_targets(s: &Structure, mask: u32, mask_known: bool) -> Vec<DecodeTarget> {
-    (0..s.num_decode_targets)
-        .map(|tgt| {
-            let mut out = DecodeTarget { active: !mask_known || mask & (1 << tgt) != 0, ..Default::default() };
-            for t in s.templates.iter().filter(|t| t.dti.get(tgt).is_some_and(|&d| d != 0)) {
-                out.spatial_layer = out.spatial_layer.max(t.spatial);
-                out.temporal_layer = out.temporal_layer.max(t.temporal);
-            }
-            out
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -305,14 +267,9 @@ mod tests {
             "c30175",
         ];
         let mut p = Parser::default();
-        let mut saw = false;
         for (i, h) in corpus.iter().enumerate() {
             let d = p.parse(&hex(h)).unwrap_or_else(|e| panic!("packet {i}: {e}")).unwrap();
-            if d.attaches_structure {
-                saw = true;
-                assert!(!d.decode_targets.is_empty(), "packet {i}");
-            }
-            assert!(saw);
+            assert_eq!(d.attaches_structure, *h == BOOTSTRAP, "packet {i}");
         }
     }
 

@@ -42,7 +42,7 @@ impl Adapter {
 pub fn parse_vp9(p: &[u8]) -> Result<Descriptor, String> {
     const SHORT: &str = "vp9: payload too short";
     let head = *p.first().ok_or(SHORT)?;
-    let (i, pb, l, f, b, e) = (head & 0x80 != 0, head & 0x40 != 0, head & 0x20 != 0, head & 0x10 != 0, head & 0x08 != 0, head & 0x04 != 0);
+    let (i, pb, l, f, b) = (head & 0x80 != 0, head & 0x40 != 0, head & 0x20 != 0, head & 0x10 != 0, head & 0x08 != 0);
     let mut off = 1;
     let mut picture_id = 0u16;
     if i {
@@ -56,11 +56,9 @@ pub fn parse_vp9(p: &[u8]) -> Result<Descriptor, String> {
             off += 1;
         }
     }
-    let (mut tid, mut sid) = (0, 0);
+    let mut tid = 0;
     if l {
-        let layers = *p.get(off).ok_or(SHORT)?;
-        tid = (layers >> 5) & 0x07;
-        sid = (layers >> 1) & 0x07;
+        tid = (*p.get(off).ok_or(SHORT)? >> 5) & 0x07;
         off += 1;
         if !f {
             p.get(off).ok_or(SHORT)?; // TL0PICIDX
@@ -69,11 +67,9 @@ pub fn parse_vp9(p: &[u8]) -> Result<Descriptor, String> {
     Ok(Descriptor {
         frame_number: picture_id,
         temporal_layer: tid,
-        spatial_layer: sid,
         // !P and B: the first packet of a keyframe; later packets of the same
         // keyframe must not re-arm the tracker.
         is_keyframe: !pb && b,
-        is_last_in_frame: e,
         ..Default::default()
     })
 }
@@ -206,16 +202,13 @@ mod tests {
     fn vp9() {
         assert!(parse_vp9(&[]).is_err());
         let k = parse_vp9(&[0x08 | 0x04]).unwrap();
-        assert!(k.is_keyframe && k.is_last_in_frame && k.temporal_layer == 0 && k.frame_number == 0);
+        assert!(k.is_keyframe && k.temporal_layer == 0 && k.frame_number == 0);
         assert!(!parse_vp9(&[0x40 | 0x08]).unwrap().is_keyframe);
-        let mid = parse_vp9(&[0x00]).unwrap();
-        assert!(!mid.is_keyframe && !mid.is_last_in_frame);
+        assert!(!parse_vp9(&[0x00]).unwrap().is_keyframe);
         assert_eq!(parse_vp9(&[0xC0, 0x42]).unwrap().frame_number, 0x42);
         assert_eq!(parse_vp9(&[0xC0, 0x80 | 0x12, 0x34]).unwrap().frame_number, 0x1234);
-        let l = parse_vp9(&[0xE0, 0x05, 2 << 5, 0x10]).unwrap();
-        assert_eq!((l.temporal_layer, l.spatial_layer), (2, 0));
-        let fl = parse_vp9(&[0xF0, 0x07, (1 << 5) | (2 << 1)]).unwrap();
-        assert_eq!((fl.temporal_layer, fl.spatial_layer), (1, 2));
+        assert_eq!(parse_vp9(&[0xE0, 0x05, 2 << 5, 0x10]).unwrap().temporal_layer, 2);
+        assert_eq!(parse_vp9(&[0xF0, 0x07, (1 << 5) | (2 << 1)]).unwrap().temporal_layer, 1);
         assert!(parse_vp9(&[0x80]).is_err());
         assert!(parse_vp9(&[0x80, 0x80]).is_err());
         assert!(parse_vp9(&[0x20, 0x00]).is_err());

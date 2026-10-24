@@ -62,27 +62,17 @@ impl Mux {
         let want = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, MAX_SOCKETS);
         let mut sockets = Vec::new();
         // min = 0: one OS-assigned port (tests, load clients).
-        if min == 0 {
-            let socket = UdpSocket::bind(("0.0.0.0", 0)).await?;
-            let port = socket.local_addr()?.port();
-            sockets.push(Arc::new(MuxSocket {
-                socket,
-                public_addr: SocketAddr::new(public_ip, port),
-                routes: RwLock::default(),
-                ufrags: RwLock::default(),
-            }));
-        }
-        for port in (min..=max).filter(|_| min != 0) {
+        let ports = if min == 0 { 0..=0 } else { min..=max };
+        for port in ports {
             if sockets.len() == want {
                 break;
             }
             match UdpSocket::bind(("0.0.0.0", port)).await {
-                Ok(socket) => sockets.push(Arc::new(MuxSocket {
-                    socket,
-                    public_addr: SocketAddr::new(public_ip, port),
-                    routes: RwLock::default(),
-                    ufrags: RwLock::default(),
-                })),
+                Ok(socket) => {
+                    let public_addr = SocketAddr::new(public_ip, socket.local_addr()?.port());
+                    sockets.push(Arc::new(MuxSocket { socket, public_addr, routes: RwLock::default(), ufrags: RwLock::default() }));
+                }
+                Err(e) if min == 0 => return Err(e),
                 Err(e) => log!("sfu: udp bind :{port}: {e}"),
             }
         }
@@ -126,14 +116,12 @@ impl MuxSocket {
                 }
             };
             let data = &buf[..n];
-            let pc = match stun_local_ufrag(data) {
-                Some(ufrag) => match self.ufrags.read().unwrap().get(ufrag).and_then(Weak::upgrade) {
-                    Some(pc) => {
-                        self.learn(src, &pc);
-                        Some(pc)
-                    }
-                    None => self.routes.read().unwrap().get(&src).and_then(Weak::upgrade),
-                },
+            let by_ufrag = stun_local_ufrag(data).and_then(|ufrag| self.ufrags.read().unwrap().get(ufrag).and_then(Weak::upgrade));
+            let pc = match by_ufrag {
+                Some(pc) => {
+                    self.learn(src, &pc);
+                    Some(pc)
+                }
                 None => self.routes.read().unwrap().get(&src).and_then(Weak::upgrade),
             };
             if let Some(pc) = pc {
@@ -210,7 +198,7 @@ static NEXT_PC_ID: AtomicU64 = AtomicU64::new(1);
 
 impl Pc {
     /// Registers `rtc` on a socket and starts its timer task. The caller has
-    /// already added the socket's host candidate (see `host_candidate`).
+    /// already added the socket's host candidate (see `rtc::build`).
     pub fn spawn(rtc: Rtc, socket: Arc<MuxSocket>, ufrag: String, handler: Weak<dyn PcHandler>) -> Arc<Pc> {
         let now = Instant::now();
         let pc = Arc::new_cyclic(|me| Pc {

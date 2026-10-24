@@ -68,8 +68,8 @@ pub async fn env_with(files_cfg: impl FnOnce(PathBuf) -> filestore::Config) -> E
                 room_id: s.to_string(),
                 app_hostname: cfg.app_hostname.clone(),
                 mux: mux.clone(),
-                presence: Some(presence.clone()),
-                files: Some(files.clone()),
+                presence: presence.clone(),
+                files: files.clone(),
             });
             (s.to_string(), r)
         })

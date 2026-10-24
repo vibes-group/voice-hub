@@ -14,7 +14,7 @@ use tower_http::services::ServeDir;
 use voice_hub::auth::{self, connpass, limiter::AuthLimiter, secrets, session};
 use voice_hub::config::{self, Config};
 use voice_hub::http::handlers::frontend_version;
-use voice_hub::http::server::{self, App, HEADER_READ_TIMEOUT};
+use voice_hub::http::server::{self, App};
 use voice_hub::presence::Hub;
 use voice_hub::sfu::{Room, RoomConfig, net::Mux};
 use voice_hub::{filestore, log, ratelimit, turn, util};
@@ -24,6 +24,7 @@ use voice_hub::{filestore, log, ratelimit, turn, util};
 const INTERNAL_ADDR: &str = "0.0.0.0:8081";
 const ROOMS: [&str; 3] = ["room1", "room2", "room3"];
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(10);
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn fatal(msg: impl std::fmt::Display) -> ! {
     log!("{msg}");
@@ -59,11 +60,12 @@ async fn main() {
     let conn_pass = connpass::Store::load(data_dir).unwrap_or_else(|e| fatal(format!("connpass store: {e}")));
 
     let files = filestore::Store::new(filestore::Config {
-        temp_dir: cfg.upload_temp_dir.clone(),
-        ttl: cfg.upload_ttl,
-        ttl_hard_cap: cfg.upload_ttl_hard_cap,
-        max_upload_bytes: cfg.upload_max_bytes,
-        max_total_bytes: cfg.upload_total_bytes,
+        temp_dir: std::env::temp_dir(),
+        ttl: Duration::from_secs(5 * 60),
+        ttl_hard_cap: Duration::from_secs(30 * 60),
+        // Mirrors the frontend's hardcoded MAX_UPLOAD_BYTES.
+        max_upload_bytes: 100 << 20,
+        max_total_bytes: 1 << 30,
         janitor_interval: Duration::from_secs(30),
     })
     .unwrap_or_else(|e| fatal(format!("file store: {e}")));
@@ -85,8 +87,8 @@ async fn main() {
                 room_id: slug.to_string(),
                 app_hostname: cfg.app_hostname.clone(),
                 mux: mux.clone(),
-                presence: Some(presence.clone()),
-                files: Some(files.clone()),
+                presence: presence.clone(),
+                files: files.clone(),
             });
             (slug.to_string(), room)
         })
@@ -97,7 +99,7 @@ async fn main() {
     }
 
     let turn_server = turn::start(turn::Config {
-        realm: cfg.turn_realm.clone(),
+        realm: cfg.app_hostname.clone(),
         shared_secret: turn_secret.clone(),
         public_ip: cfg.public_ip.clone(),
         listen_addr: "0.0.0.0:3478".into(),

@@ -12,17 +12,16 @@ use tokio_util::sync::CancellationToken;
 
 pub use session::{Role, Session};
 
-/// Reports whether the request carries a valid, non-stale session. User
-/// sessions die when their ConnPass entry is gone or its generation bumped;
-/// admin sessions die when APP_ADMIN_PASSWORD_HASH changed.
-pub fn authenticated(secret: &[u8], conn_pass: &connpass::Store, admin_ver: &str, headers: &http::HeaderMap) -> bool {
-    let Some(sess) = session::from_headers(secret, headers) else {
-        return false;
-    };
-    match sess.role {
+/// The request's session if it is valid and not stale. User sessions die when
+/// their ConnPass entry is gone or its generation bumped; admin sessions die
+/// when APP_ADMIN_PASSWORD_HASH changed.
+pub fn valid_session(secret: &[u8], conn_pass: &connpass::Store, admin_ver: &str, headers: &http::HeaderMap) -> Option<Session> {
+    let sess = session::from_headers(secret, headers)?;
+    let live = match sess.role {
         Role::User => conn_pass.entry_generation(&sess.entry_id) == Some(sess.generation),
         Role::Admin => password::constant_time_str_eq(&sess.admin_version, admin_ver),
-    }
+    };
+    live.then_some(sess)
 }
 
 /// Tracks live /ws and /api/presence connections with their role so the admin
@@ -47,17 +46,17 @@ impl WsRegistry {
     /// Cancels every connection (shutdown: SSE streams would otherwise hold
     /// the graceful drain open).
     pub fn disconnect_all(&self) {
-        let cancels: Vec<CancellationToken> = self.entries.lock().unwrap().values().map(|(_, c)| c.clone()).collect();
-        for c in cancels {
-            c.cancel();
-        }
+        self.disconnect(|_| true);
     }
 
-    /// Cancels every user-role connection. Cancels run outside the lock since
-    /// connection cleanup calls `remove`.
     pub fn disconnect_users(&self) -> usize {
+        self.disconnect(|role| role == Role::User)
+    }
+
+    /// Cancels run outside the lock since connection cleanup calls `remove`.
+    fn disconnect(&self, pick: impl Fn(Role) -> bool) -> usize {
         let cancels: Vec<CancellationToken> =
-            self.entries.lock().unwrap().values().filter(|(role, _)| *role == Role::User).map(|(_, c)| c.clone()).collect();
+            self.entries.lock().unwrap().values().filter(|(role, _)| pick(*role)).map(|(_, c)| c.clone()).collect();
         for c in &cancels {
             c.cancel();
         }

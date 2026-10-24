@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bytes::Bytes;
 use http::{HeaderValue, Method, StatusCode, header};
@@ -16,7 +16,7 @@ use http_body_util::BodyExt;
 use tower_http::services::ServeDir;
 
 use super::{Body, Req, Resp, client_ip, error, go_duration_ms, handlers, not_found, redirect, upload, ws};
-use crate::auth::{self, Role, WsRegistry, connpass, limiter::AuthLimiter, session};
+use crate::auth::{self, Role, Session, WsRegistry, connpass, limiter::AuthLimiter};
 use crate::config::Config;
 use crate::filestore;
 use crate::presence::Hub;
@@ -43,13 +43,16 @@ pub struct App {
 }
 
 impl App {
+    pub fn session(&self, headers: &http::HeaderMap) -> Option<Session> {
+        auth::valid_session(&self.session_secret, &self.conn_pass, &self.admin_ver, headers)
+    }
+
     pub fn authenticated(&self, headers: &http::HeaderMap) -> bool {
-        auth::authenticated(&self.session_secret, &self.conn_pass, &self.admin_ver, headers)
+        self.session(headers).is_some()
     }
 
     pub fn is_admin(&self, headers: &http::HeaderMap) -> bool {
-        session::from_headers(&self.session_secret, headers)
-            .is_some_and(|s| s.role == Role::Admin && auth::password::constant_time_str_eq(&s.admin_version, &self.admin_ver))
+        self.session(headers).is_some_and(|s| s.role == Role::Admin)
     }
 }
 
@@ -156,10 +159,7 @@ async fn route(app: Arc<App>, mut req: Req, peer: SocketAddr) -> Resp {
             return handlers::presence(&app, &req);
         }
         ["ws", room_id] if get && !room_id.is_empty() => {
-            if !app.authenticated(req.headers()) {
-                return error(StatusCode::UNAUTHORIZED, "unauthorized");
-            }
-            let Some(sess) = session::from_headers(&app.session_secret, req.headers()) else {
+            let Some(sess) = app.session(req.headers()) else {
                 return error(StatusCode::UNAUTHORIZED, "unauthorized");
             };
             let Some(room) = app.rooms.get(&param(room_id)).cloned() else {
@@ -205,12 +205,11 @@ async fn route(app: Arc<App>, mut req: Req, peer: SocketAddr) -> Resp {
             return upload::download(&app, req, &id).await;
         }
         ["api", "admin", "connection-passwords", rest @ ..] => {
-            let m = req.method().clone();
             let admin_route = match rest {
                 [] => get || post,
                 ["disconnect-users"] => post,
                 [id, "rotate" | "rename" | "ttl"] => post && !id.is_empty(),
-                [id] => m == Method::DELETE && !id.is_empty(),
+                [id] => req.method() == Method::DELETE && !id.is_empty(),
                 _ => false,
             };
             if admin_route {
@@ -267,5 +266,3 @@ pub async fn handle_internal(app: Arc<App>, req: Req) -> Resp {
     }
     not_found()
 }
-
-pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);

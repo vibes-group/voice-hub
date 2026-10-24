@@ -27,12 +27,12 @@ use crate::sfu::net::{Mux, Pc, PcHandler};
 use crate::sfu::rtc;
 
 const PROBE_MAGIC: &[u8; 4] = b"VHLT";
-pub const PROBE_LEN: usize = 20;
+const PROBE_LEN: usize = 20;
 /// Our synthetic VP9 payload descriptor: I(15-bit id), L, non-flexible.
 const VP9_DESC_LEN: usize = 5;
 const VIDEO_MTU_PAYLOAD: usize = 1100;
 
-pub fn now_ns() -> u64 {
+fn now_ns() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
 }
 
@@ -286,7 +286,7 @@ impl PcHandler for ClientPc {
                 let video = *pkt.header.payload_type != rtc::PT_OPUS;
                 let body = if video { pkt.payload.get(VP9_DESC_LEN..).unwrap_or(&[]) } else { &pkt.payload[..] };
                 let Some((publisher, seq, sent)) = parse_probe(body) else { return };
-                peer.first_media(publisher);
+                peer.first_media();
                 let lat = Stats::latency(sent);
                 if video {
                     peer.stats.video.lock().unwrap().entry(publisher).or_default().add(*pkt.seq_no);
@@ -447,7 +447,7 @@ impl ClientPeer {
         let _ = self.out.send(m);
     }
 
-    fn first_media(&self, _publisher: u32) {
+    fn first_media(&self) {
         if !self.got_media.swap(true, Ordering::AcqRel) {
             let us = self.connected_at.elapsed().as_micros() as u32;
             self.stats.samples.lock().unwrap().first_media_us.push(us);

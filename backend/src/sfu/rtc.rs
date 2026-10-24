@@ -105,11 +105,11 @@ pub fn build_with(socket: &MuxSocket, stats: bool, av1: bool) -> (Rtc, String) {
             spec(Codec::Vp9, Frequency::NINETY_KHZ, None, FormatParams::default()),
         ),
     ];
-    // Browsers use PLI; a forwarded FIR would be ignored (only MediaSSRC is
-    // rewritten), so FIR is not offered.
     if !av1 {
         params.retain(|p| p.spec().codec != Codec::Av1);
     }
+    // Browsers use PLI; a forwarded FIR would be ignored (only MediaSSRC is
+    // rewritten), so FIR is not offered.
     for p in &mut params {
         p.set_fb_fir(false);
         p.set_fb_remb(false);

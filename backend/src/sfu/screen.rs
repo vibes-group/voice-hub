@@ -16,6 +16,7 @@ use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::format::Codec;
 use str0m::media::{Direction, KeyframeRequestKind, MediaKind, Mid, Pt};
 use str0m::rtp::{RtpPacket, RtpWrite, SeqNo};
+use tokio_tungstenite::tungstenite::Utf8Bytes;
 use tokio_util::sync::CancellationToken;
 
 use super::codec::{Adapter, ChainTracker};
@@ -65,10 +66,6 @@ fn policy(m: ScreenShareMode) -> ModePolicy {
         ScreenShareMode::Sharp => SHARP,
         ScreenShareMode::Motion => MOTION,
     }
-}
-
-fn encode_mode(m: ScreenShareMode) -> u8 {
-    m as u8
 }
 
 fn decode_mode(v: u8) -> ScreenShareMode {
@@ -241,6 +238,18 @@ impl ScreenSession {
         decode_mode(self.mode.load(Ordering::Acquire))
     }
 
+    fn available_msg(&self, publisher_id: &str) -> Utf8Bytes {
+        msg(
+            "screen-share-available",
+            &protocol::ScreenShareAvailable {
+                publisher_id,
+                has_system_audio: self.has_system_audio,
+                video_codec: Some(self.video_codec()),
+                mode: Some(self.mode()),
+            },
+        )
+    }
+
     fn subscribers(&self) -> Arc<Vec<Arc<ScreenSub>>> {
         self.view.read().unwrap().clone()
     }
@@ -371,10 +380,6 @@ impl Room {
         p.send_event("screen-share-error", &protocol::ScreenShareError { publisher_id, reason });
     }
 
-    fn peer_handle(&self, id: &str) -> Option<Arc<Peer>> {
-        self.state.lock().unwrap().peers.get(id).map(|e| e.peer.clone())
-    }
-
     pub(super) fn find_session(&self, token: &str) -> Option<Arc<ScreenSession>> {
         self.state.lock().unwrap().sessions_by_token.get(token).cloned()
     }
@@ -401,9 +406,6 @@ impl Room {
             match st.peers.get_mut(&p.id) {
                 Some(e) if e.screen_session.is_none() => {
                     e.screen_session = Some(session.clone());
-                    e.screen_sharing = true;
-                    e.screen_sharing_has_audio = session.has_system_audio;
-                    e.screen_sharing_video_codec = Some(session.video_codec());
                     st.sessions_by_token.insert(session.token.clone(), session.clone());
                     true
                 }
@@ -444,7 +446,7 @@ impl Room {
                 token,
                 has_system_audio: data.has_system_audio,
                 video_codec: OnceLock::new(),
-                mode: AtomicU8::new(encode_mode(mode)),
+                mode: AtomicU8::new(mode as u8),
                 publisher_pc: Pc::spawn(rtc, socket, ufrag, handler),
                 room,
                 inner: Mutex::default(),
@@ -509,15 +511,7 @@ impl Room {
             (e.info(), Self::others(&st, &pub_id))
         };
         let info_msg = msg("peer-info", &info);
-        let avail = msg(
-            "screen-share-available",
-            &protocol::ScreenShareAvailable {
-                publisher_id: &pub_id,
-                has_system_audio: session.has_system_audio,
-                video_codec: Some(session.video_codec()),
-                mode: Some(session.mode()),
-            },
-        );
+        let avail = session.available_msg(&pub_id);
         for op in &others {
             op.send(&info_msg);
             op.send(&avail);
@@ -534,7 +528,7 @@ impl Room {
             self.send_screen_error(p, "", ScreenShareReason::NotFound);
             return;
         };
-        if session.mode.swap(encode_mode(mode), Ordering::AcqRel) == encode_mode(mode) {
+        if session.mode.swap(mode as u8, Ordering::AcqRel) == mode as u8 {
             return;
         }
         session.request_keyframe();
@@ -583,9 +577,6 @@ impl Room {
             let info = st.peers.get_mut(&pub_id).map(|e| {
                 if e.screen_session.as_ref().is_some_and(|s| Arc::ptr_eq(s, session)) {
                     e.screen_session = None;
-                    e.screen_sharing = false;
-                    e.screen_sharing_has_audio = false;
-                    e.screen_sharing_video_codec = None;
                 }
                 e.info()
             });
@@ -841,9 +832,6 @@ impl Room {
             session.refresh_view(&inner);
             drop(inner);
             entry.screen_session = Some(session.clone());
-            entry.screen_sharing = true;
-            entry.screen_sharing_has_audio = session.has_system_audio;
-            entry.screen_sharing_video_codec = Some(session.video_codec());
             (session, old, stale, grace)
         };
         let (session, old, stale, grace) = claimed;
@@ -866,15 +854,7 @@ impl Room {
         };
         let info_msg = msg("peer-info", &info);
         let ended = msg("screen-share-ended", &protocol::ScreenShareEnded { publisher_id: &old });
-        let avail = msg(
-            "screen-share-available",
-            &protocol::ScreenShareAvailable {
-                publisher_id: &p.id,
-                has_system_audio: session.has_system_audio,
-                video_codec: Some(session.video_codec()),
-                mode: Some(session.mode()),
-            },
-        );
+        let avail = session.available_msg(&p.id);
         for op in &others {
             op.send(&info_msg);
             op.send(&ended);

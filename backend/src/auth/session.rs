@@ -1,12 +1,12 @@
 //! Signed session cookie: `<exp>:<role>:<gen>:<adminVer>:<entryID>.<sig>`.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
 use super::password::constant_time_str_eq;
-use crate::util::b64_raw_url;
+use crate::util::{b64_raw_url, unix_secs};
 
 pub const COOKIE_NAME: &str = "vh_session";
 pub const SESSION_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
@@ -46,14 +46,11 @@ fn sign(secret: &[u8], payload: &str) -> String {
 /// base64url HMAC fingerprint of the admin password hash; the hash itself is
 /// never stored in the cookie.
 pub fn admin_password_version(secret: &[u8], password_hash: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("any key length");
-    mac.update(b"admin-password:v2:");
-    mac.update(password_hash.as_bytes());
-    b64_raw_url(&mac.finalize().into_bytes())
+    sign(secret, &format!("admin-password:v2:{password_hash}"))
 }
 
 pub fn encode(secret: &[u8], role: Role, gen_: u64, admin_ver: &str, entry_id: &str, ttl: Duration) -> String {
-    encode_at(secret, role, gen_, admin_ver, entry_id, unix(SystemTime::now() + ttl))
+    encode_at(secret, role, gen_, admin_ver, entry_id, unix_secs(SystemTime::now() + ttl))
 }
 
 /// Encodes with an absolute expiry; also lets tests mint already-expired cookies.
@@ -61,13 +58,6 @@ pub fn encode_at(secret: &[u8], role: Role, gen_: u64, admin_ver: &str, entry_id
     let payload = format!("{exp_unix}:{}:{gen_}:{admin_ver}:{entry_id}", role.as_str());
     let sig = sign(secret, &payload);
     format!("{payload}.{sig}")
-}
-
-fn unix(t: SystemTime) -> i64 {
-    match t.duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_secs() as i64,
-        Err(e) => -(e.duration().as_secs() as i64),
-    }
 }
 
 pub fn decode(secret: &[u8], value: &str) -> Option<Session> {
@@ -86,7 +76,7 @@ pub fn decode(secret: &[u8], value: &str) -> Option<Session> {
         _ => return None,
     };
     let generation: u64 = parts[2].parse().ok()?;
-    if unix(SystemTime::now()) > exp {
+    if unix_secs(SystemTime::now()) > exp {
         return None;
     }
     Some(Session { role, generation, admin_version: parts[3].to_string(), entry_id: parts[4].to_string() })
@@ -95,29 +85,18 @@ pub fn decode(secret: &[u8], value: &str) -> Option<Session> {
 /// `Set-Cookie` value for a fresh session.
 pub fn session_cookie(secure: bool, secret: &[u8], role: Role, gen_: u64, admin_ver: &str, entry_id: &str) -> String {
     let value = encode(secret, role, gen_, admin_ver, entry_id, SESSION_TTL);
-    cookie_header(&value, SESSION_TTL.as_secs() as i64, secure)
+    let expires = http_date(SystemTime::now() + SESSION_TTL);
+    cookie_header(&value, &format!("Expires={expires}; Max-Age={}", SESSION_TTL.as_secs()), secure)
 }
 
 /// `Set-Cookie` that clears the session.
 pub fn clear_cookie(secure: bool) -> String {
-    cookie_header("", -1, secure)
+    cookie_header("", "Max-Age=0", secure)
 }
 
-fn cookie_header(value: &str, max_age: i64, secure: bool) -> String {
-    let mut s = format!("{COOKIE_NAME}={value}; Path=/");
-    if max_age > 0 {
-        let expires = SystemTime::now() + Duration::from_secs(max_age as u64);
-        s.push_str(&format!("; Expires={}", http_date(expires)));
-        s.push_str(&format!("; Max-Age={max_age}"));
-    } else if max_age < 0 {
-        s.push_str("; Max-Age=0");
-    }
-    s.push_str("; HttpOnly");
-    if secure {
-        s.push_str("; Secure");
-    }
-    s.push_str("; SameSite=Strict");
-    s
+fn cookie_header(value: &str, lifetime: &str, secure: bool) -> String {
+    let secure = if secure { "; Secure" } else { "" };
+    format!("{COOKIE_NAME}={value}; Path=/; {lifetime}; HttpOnly{secure}; SameSite=Strict")
 }
 
 fn http_date(t: SystemTime) -> String {
@@ -127,7 +106,7 @@ fn http_date(t: SystemTime) -> String {
 }
 
 /// Extracts a cookie value from a raw `Cookie` header list.
-pub fn cookie_value<'a>(headers: &'a http::HeaderMap, name: &str) -> Option<&'a str> {
+fn cookie_value<'a>(headers: &'a http::HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get_all(http::header::COOKIE)
         .iter()
@@ -177,7 +156,7 @@ mod tests {
         assert!(decode(SECRET, &token.replacen(":1:", ":99:", 1)).is_none());
         let token = encode(SECRET, Role::Admin, 0, "", "", Duration::from_secs(3600));
         assert!(decode(b"ffffffffffffffffffffffffffffffff", &token).is_none());
-        let expired = encode_at(SECRET, Role::Admin, 0, "", "", unix(SystemTime::now()) - 1);
+        let expired = encode_at(SECRET, Role::Admin, 0, "", "", unix_secs(SystemTime::now()) - 1);
         assert!(decode(SECRET, &expired).is_none());
         let payload = "9999999999:root:0:";
         assert!(decode(SECRET, &format!("{payload}.{}", sign(SECRET, payload))).is_none());
@@ -186,7 +165,9 @@ mod tests {
     #[test]
     fn cookie_is_strict() {
         let c = session_cookie(true, SECRET, Role::User, 0, "", "");
-        assert!(c.contains("SameSite=Strict") && c.contains("HttpOnly") && c.contains("Secure"));
+        assert!(c.starts_with("vh_session=") && c.contains("; Path=/; Expires="), "{c}");
+        assert!(c.ends_with(" GMT; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict"), "{c}");
+        assert_eq!(clear_cookie(false), "vh_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
     }
 
     #[test]

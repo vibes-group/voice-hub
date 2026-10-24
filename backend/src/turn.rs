@@ -4,7 +4,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
@@ -15,7 +15,7 @@ use turn::server::config::{ConnConfig, ServerConfig};
 use webrtc_util::vnet::net::Net;
 
 use crate::log;
-use crate::util::b64_std;
+use crate::util::{b64_std, unix_secs};
 
 pub struct Config {
     /// Usually the public hostname.
@@ -46,7 +46,7 @@ struct RestAuth {
 impl AuthHandler for RestAuth {
     fn auth_handle(&self, username: &str, realm: &str, src: SocketAddr) -> Result<Vec<u8>, turn::Error> {
         let expiry = username.split(':').next().and_then(|t| t.parse::<i64>().ok());
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+        let now = unix_secs(SystemTime::now());
         match expiry {
             Some(t) if t >= now => Ok(generate_auth_key(username, realm, &credential(&self.secret, username))),
             _ => {

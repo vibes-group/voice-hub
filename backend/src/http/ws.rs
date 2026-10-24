@@ -19,17 +19,17 @@ pub const READ_LIMIT: usize = 256 * 1024;
 /// upgrade, or the error response to send instead.
 pub fn accept(req: &mut Req, origin_patterns: &[String]) -> Result<(Resp, OnUpgrade), Box<Resp>> {
     let h = req.headers();
-    if !header_has_token(h, header::CONNECTION, "upgrade") {
-        let mut r = error(StatusCode::UPGRADE_REQUIRED, "WebSocket protocol violation: Connection header \"\" does not contain Upgrade");
+    let upgrade_required = |msg: &str| {
+        let mut r = error(StatusCode::UPGRADE_REQUIRED, msg);
         r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
         r.headers_mut().insert(header::UPGRADE, HeaderValue::from_static("websocket"));
-        return Err(Box::new(r));
+        Box::new(r)
+    };
+    if !header_has_token(h, header::CONNECTION, "upgrade") {
+        return Err(upgrade_required("WebSocket protocol violation: Connection header \"\" does not contain Upgrade"));
     }
     if !header_has_token(h, header::UPGRADE, "websocket") {
-        let mut r = error(StatusCode::UPGRADE_REQUIRED, "WebSocket protocol violation: Upgrade header does not contain websocket");
-        r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("Upgrade"));
-        r.headers_mut().insert(header::UPGRADE, HeaderValue::from_static("websocket"));
-        return Err(Box::new(r));
+        return Err(upgrade_required("WebSocket protocol violation: Upgrade header does not contain websocket"));
     }
     if req.method() != http::Method::GET {
         return Err(Box::new(error(StatusCode::METHOD_NOT_ALLOWED, "WebSocket protocol violation: handshake request method is not GET")));

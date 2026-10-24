@@ -13,10 +13,10 @@ use str0m::media::{Direction, MediaKind, Mid, Pt};
 use str0m::rtp::{RtpPacket, RtpWrite, SeqNo};
 use tokio_util::sync::CancellationToken;
 
+use super::Room;
 use super::net::{Pc, PcHandler};
 use super::protocol::{AudioSlot, AudioSlots, PcKind, SdpEnvelope};
 use super::rtc::{self, PT_OPUS};
-use super::{Room, track_key};
 use crate::log;
 
 /// Slots in the first offer; enough that typical rooms never renegotiate.
@@ -28,8 +28,7 @@ const SAMPLES_PER_FRAME: u32 = 960;
 
 /// One published audio track and the slots it is forwarded into.
 pub struct AudioTrack {
-    pub key: String,
-    owner: String,
+    pub owner: String,
     /// Copy-on-write so the forward path never holds the lock while it
     /// writes into a subscriber PC.
     subs: RwLock<Arc<Vec<Arc<Sub>>>>,
@@ -89,8 +88,8 @@ impl Sub {
 }
 
 impl AudioTrack {
-    fn new(owner: &str, kind: &str) -> Arc<AudioTrack> {
-        Arc::new(AudioTrack { key: track_key(owner, kind), owner: owner.to_string(), subs: RwLock::default() })
+    fn new(owner: &str) -> Arc<AudioTrack> {
+        Arc::new(AudioTrack { owner: owner.to_string(), subs: RwLock::default() })
     }
 
     fn update(&self, f: impl FnOnce(&mut Vec<Arc<Sub>>)) {
@@ -177,7 +176,7 @@ impl AudioPeer {
     pub fn close(&self) {
         self.pc.close();
         if let (Some(t), Some(room)) = (self.track.get(), self.room.upgrade()) {
-            room.unpublish_track(&t.key, t);
+            room.unpublish_track(t);
         }
         for t in self.sync.lock().unwrap().slots.iter().filter_map(|s| s.track.as_ref()) {
             t.remove_sub(&self.pc);
@@ -236,7 +235,7 @@ impl AudioPeer {
         }
         let mut new: Vec<&Arc<AudioTrack>> =
             want.into_iter().filter(|t| !st.slots.iter().any(|s| s.track.as_ref().is_some_and(|a| Arc::ptr_eq(a, t)))).collect();
-        new.sort_by(|a, b| a.key.cmp(&b.key));
+        new.sort_by(|a, b| a.owner.cmp(&b.owner));
 
         let mut new = new.into_iter();
         let mut subscribe = Vec::new();
@@ -287,7 +286,7 @@ impl AudioPeer {
     }
 
     fn send<T: serde::Serialize>(&self, event: &str, data: &T) {
-        if let Some(p) = self.room.upgrade().and_then(|r| r.state.lock().unwrap().peers.get(&self.peer_id).map(|e| e.peer.clone())) {
+        if let Some(p) = self.room.upgrade().and_then(|r| r.peer_handle(&self.peer_id)) {
             p.send_event(event, data);
         }
     }
@@ -299,7 +298,7 @@ impl PcHandler for AudioPeer {
             // Forwarded as-is, padding included: dropping any packet would
             // show up as loss downstream.
             let track = self.track.get_or_init(|| {
-                let t = AudioTrack::new(&self.peer_id, "audio");
+                let t = AudioTrack::new(&self.peer_id);
                 if let Some(room) = self.room.upgrade() {
                     room.publish_track(t.clone());
                 }

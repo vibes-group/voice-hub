@@ -19,7 +19,6 @@ use crate::{log, turn, util};
 /// Short enough to limit exposure if leaked, long enough to cover a call and
 /// brief reconnects.
 const TURN_CREDS_TTL: Duration = Duration::from_secs(6 * 3600);
-const TURN_USERNAME_PREFIX: &str = "u";
 const MAX_CONN_PASS_TTL: Duration = Duration::from_secs(366 * 24 * 3600);
 /// Go's ParseForm cap on urlencoded bodies.
 const MAX_FORM_BYTES: usize = 10 << 20;
@@ -147,12 +146,10 @@ pub fn logout(app: &App) -> Resp {
     with_cookie(session::clear_cookie(app.cfg.cookie_secure))
 }
 
-/// TURN REST API credentials: username `<unix_expiry>:<id>`, credential
+/// TURN REST API credentials: username `<unix_expiry>:u`, credential
 /// base64(HMAC-SHA1(secret, username)).
-pub fn turn_credentials(secret: &str, id: &str, ttl: Duration) -> (String, String) {
-    let id = if id.is_empty() { "anon" } else { id };
-    let expiry = util::unix_secs(SystemTime::now() + ttl);
-    let username = format!("{expiry}:{id}");
+fn turn_credentials(secret: &str) -> (String, String) {
+    let username = format!("{}:u", util::unix_secs(SystemTime::now() + TURN_CREDS_TTL));
     let credential = turn::credential(secret, &username);
     (username, credential)
 }
@@ -173,7 +170,7 @@ pub fn app_config(app: &App, req: &Req) -> Resp {
         role: &'a str,
     }
     let role = session::from_headers(&app.session_secret, req.headers()).map(|s| s.role.as_str()).unwrap_or("");
-    let (username, credential) = turn_credentials(&app.turn_secret, TURN_USERNAME_PREFIX, TURN_CREDS_TTL);
+    let (username, credential) = turn_credentials(&app.turn_secret);
     json(
         StatusCode::OK,
         &AppConfig {
@@ -318,17 +315,15 @@ pub async fn admin(app: &App, req: Req, rest: &[String]) -> Resp {
             Err(e) => connpass_error(e, "rotate"),
         },
         (Method::POST, [id, "rename"]) => {
-            let id = id.to_string();
             let body = admin_body(req).await;
-            match store.rename(&id, &body.label) {
+            match store.rename(id, &body.label) {
                 Ok(()) => no_content(),
                 Err(e) => connpass_error(e, "rename"),
             }
         }
         (Method::POST, [id, "ttl"]) => {
-            let id = id.to_string();
             let body = admin_body(req).await;
-            match store.set_ttl(&id, ttl_from_seconds(body.ttl_seconds)) {
+            match store.set_ttl(id, ttl_from_seconds(body.ttl_seconds)) {
                 Ok(entry) => json(StatusCode::OK, &entry),
                 Err(e) => connpass_error(e, "set ttl"),
             }
@@ -497,7 +492,7 @@ mod tests {
 
     #[test]
     fn turn_creds_shape() {
-        let (u, c) = turn_credentials("secret", "u", Duration::from_secs(60));
+        let (u, c) = turn_credentials("secret");
         assert!(u.ends_with(":u"));
         assert_eq!(c, turn::credential("secret", &u));
     }

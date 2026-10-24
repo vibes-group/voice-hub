@@ -4,7 +4,8 @@
 //! TTL- and budget-driven.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -57,10 +58,10 @@ impl Store {
         std::fs::create_dir_all(&cfg.temp_dir)?;
         let work_dir = cfg.temp_dir.join(format!("voice-hub-uploads-{}", hex(&random_bytes::<6>())));
         std::fs::create_dir(&work_dir)?;
-        set_mode(&work_dir, 0o700)?;
+        std::fs::set_permissions(&work_dir, std::fs::Permissions::from_mode(0o700))?;
         let store = Arc::new(Store { cfg, work_dir, state: Mutex::default(), janitor: Mutex::new(None) });
         let weak = Arc::downgrade(&store);
-        let interval = if store.cfg.janitor_interval.is_zero() { Duration::from_secs(60) } else { store.cfg.janitor_interval };
+        let interval = store.cfg.janitor_interval;
         let handle = tokio::spawn(async move {
             let mut tick = tokio::time::interval(interval);
             tick.tick().await;
@@ -176,11 +177,6 @@ impl Store {
         }
         let _ = std::fs::remove_dir_all(&self.work_dir);
     }
-}
-
-fn set_mode(p: &Path, mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode))
 }
 
 #[cfg(test)]
