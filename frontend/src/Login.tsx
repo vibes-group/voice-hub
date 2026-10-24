@@ -67,7 +67,7 @@ export function Login() {
         </button>
       )}
       <DesktopDownloadButton className="fixed top-4 right-4 z-10" />
-      <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
+      <main className="card w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,60px)]">
         <div className="flex items-center gap-2.5 mb-6">
           <img src="/favicon.svg" alt="" width={22} height={22} className="block" />
           <span className="font-extrabold text-[16px] uppercase tracking-[0.2em] text-accent">
@@ -78,12 +78,7 @@ export function Login() {
           Вход
         </h1>
         <div className="text-muted-2 text-[12px] mb-6">Введите пароль для входа.</div>
-        <form
-          id="login-form"
-          method="post"
-          action="/api/login"
-          onSubmit={handleSubmit}
-        >
+        <form id="login-form" method="post" action="/api/login" onSubmit={handleSubmit}>
           <div className="grid gap-2">
             <label htmlFor="password" className="section-label">
               Пароль

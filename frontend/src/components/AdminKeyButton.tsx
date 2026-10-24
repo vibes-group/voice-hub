@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Key, Plus } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { useConnPassApi } from '../hooks/useConnPassApi';
-import type { PlaintextResponse } from '../hooks/useConnPassApi';
+import { useConnPassApi, type PlaintextResponse } from '../hooks/useConnPassApi';
 import { AdminConnPassEntryRow, TTL_PRESETS } from './AdminConnPassEntryRow';
 
 type Mode = 'list' | 'plaintext';
@@ -16,7 +15,8 @@ function describeEntry(label: string): string {
 
 export function AdminKeyButton() {
   const isAdmin = useStore((s) => s.role === 'admin');
-  const { entries, refresh, create, rotate, rename, revoke, setTTL, disconnectUsers } = useConnPassApi();
+  const { entries, refresh, create, rotate, rename, revoke, setTTL, disconnectUsers } =
+    useConnPassApi();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>('list');
   const [plaintext, setPlaintext] = useState<PlaintextResponse | null>(null);
@@ -26,8 +26,7 @@ export function AdminKeyButton() {
   const [newLabel, setNewLabel] = useState('');
   const [newTTL, setNewTTL] = useState<number>(0);
 
-  // Seed the entry list once isAdmin flips true so the badge in the trigger
-  // can later show counts without opening the modal.
+  // Prefetch so the modal opens with the list already filled.
   useEffect(() => {
     if (!isAdmin) return;
     void refresh();
@@ -63,14 +62,11 @@ export function AdminKeyButton() {
   const handleCreate = useCallback(
     () =>
       withBusy(async () => {
-        const data = await create(newLabel, newTTL);
-        if (data) {
-          setPlaintext(data);
-          setMode('plaintext');
-          setNewLabel('');
-          setNewTTL(0);
-          await refresh();
-        }
+        setPlaintext(await create(newLabel, newTTL));
+        setMode('plaintext');
+        setNewLabel('');
+        setNewTTL(0);
+        await refresh();
       }),
     [withBusy, create, newLabel, newTTL, refresh],
   );
@@ -121,9 +117,7 @@ export function AdminKeyButton() {
 
   const handleDisconnectUsers = useCallback(async () => {
     if (!window.confirm('Отключить пользователей?')) return;
-    await withBusy(async () => {
-      await disconnectUsers();
-    });
+    await withBusy(disconnectUsers);
   }, [withBusy, disconnectUsers]);
 
   const copy = useCallback(async (label: string, text: string) => {
@@ -159,7 +153,7 @@ export function AdminKeyButton() {
           onClick={handleClose}
         >
           <div
-            className="card card-lg w-[min(520px,100%)] p-6 mobile:p-4 mobile:max-h-full mobile:overflow-y-auto"
+            className="card w-[min(520px,100%)] p-6 mobile:p-4 mobile:max-h-full mobile:overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {mode === 'list' && (

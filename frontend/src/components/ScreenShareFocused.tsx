@@ -99,6 +99,7 @@ export function ScreenShareFocused({ onClose }: Props) {
   if (!focusedId) return null;
 
   const { qualityLabel, fpsLabel } = formatVideoStats(videoSize, fps);
+  const badges = [videoCodec?.toUpperCase(), qualityLabel, fpsLabel].filter(Boolean);
   const ended = !shareStillLive;
 
   return (
@@ -106,21 +107,14 @@ export function ScreenShareFocused({ onClose }: Props) {
       <header className="flex items-center justify-between px-4 py-2 text-zinc-200">
         <span className="text-sm font-medium truncate flex items-center gap-2 mobile:min-w-0 mobile:flex-wrap">
           Экран · {display}
-          {videoCodec && (
-            <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
-              {videoCodec.toUpperCase()}
+          {badges.map((b) => (
+            <span
+              key={b}
+              className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80"
+            >
+              {b}
             </span>
-          )}
-          {qualityLabel && (
-            <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
-              {qualityLabel}
-            </span>
-          )}
-          {fpsLabel && (
-            <span className="text-xs font-normal text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-800/80">
-              {fpsLabel}
-            </span>
-          )}
+          ))}
         </span>
         <div className="flex items-center gap-2">
           {hasSystemAudio && !ended && (

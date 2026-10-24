@@ -168,8 +168,8 @@ export function labelFromCode(code: string): string | null {
   }
 }
 
-// Sort keys so modifiers come first in canonical Ctrl/Shift/Alt/Meta order,
-// then the non-modifier (capture order).
+// Modifiers first in Ctrl/Shift/Alt/Meta order (left/right variants collapse
+// to one entry), then the rest in capture order.
 export function canonicalizeKeys(keys: string[]): string[] {
   const order = ['Ctrl', 'Shift', 'Alt', 'Meta'];
   const mods = order.filter((m) => keys.includes(m));

@@ -1,10 +1,6 @@
-// Reactive state for screen-share UI.
-//
-// Lives in its own Zustand store (not useStore.ts) so the existing participants
-// / chat / audio state isn't touched by every screen-share UI re-render and
-// vice versa. Audio nodes follow the same pattern (kept imperative outside the
-// store); MediaStreams here are exceptions — the focused video tile reads
-// `focusedStream` directly to feed `<video>.srcObject`.
+// Screen-share UI state, separate from useStore so share updates don't
+// re-render participant/chat subscribers. Unlike audio nodes, MediaStreams do
+// live here: the focused view feeds `focusedStream` straight to <video>.
 
 import { create } from 'zustand';
 
@@ -19,7 +15,7 @@ export type ScreenShare = {
 
 /** Local publisher state — independent from the shares map (which lists what's
  * happening in the room, not what we're publishing). */
-export type MyShareStatus = 'idle' | 'starting' | 'publishing' | 'stopping';
+type MyShareStatus = 'idle' | 'starting' | 'publishing' | 'stopping';
 
 /** Remote shares (everyone but us), ordered by publisherId so every client
  * shows them — and navigates them with ←/→ — in the same order. Map iteration
@@ -33,7 +29,7 @@ export function selectOtherShares(
     .sort((a, b) => a.publisherId.localeCompare(b.publisherId));
 }
 
-export type ScreenShareState = {
+type ScreenShareState = {
   shares: Map<string, ScreenShare>;
   upsertShare: (share: ScreenShare) => void;
   removeShare: (publisherId: string) => void;

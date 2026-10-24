@@ -1,114 +1,68 @@
-// Factory for AudioWorklet-backed denoisers.
-//
-// Every Worklet denoiser shares the same lifecycle: preload assets once,
-// register the module per AudioContext, construct an AudioWorkletNode
-// (mono, mix=1), then race a {ready|error} port handshake against an
-// init timeout. Engines differ only in:
-//   - what they fetch at preload (worklet JS, optional WASM/model bytes,
-//     or a runtime-built blob URL),
-//   - whether they post an init payload after construction (heavier
-//     engines ship wasm + model bytes via port; RNNoise needs nothing).
-//
-// `preloadAssets` is the single seam: it returns the resolved module URL
-// plus an optional init payload. The factory caches both, retries on
-// failure, and reuses them for every subsequent context.
-//
-// Adding a Worker-offloaded engine slots into the same shape: preloadAssets
-// would spawn the Worker + create SharedArrayBuffer rings, the worklet
-// processor would shuttle bytes between rings, and the init payload would
-// carry the SAB references. Nothing outside the factory needs to know.
+// AudioWorklet-backed denoiser: load the module once, register it per
+// AudioContext, construct a mono node and wait for its {ready|error} reply.
 
 import type { Denoiser, DenoiserId, DenoiserNode } from './denoisers/types';
 
-const DEFAULT_SAMPLE_RATE = 48000;
-const DEFAULT_INIT_TIMEOUT_MS = 3000;
+const SAMPLE_RATE = 48000;
+const INIT_TIMEOUT_MS = 3000;
 
-export type WorkletDenoiserAssets = {
-  // URL passed to ctx.audioWorklet.addModule(). Static, blob:, or any
-  // valid URL — the factory does not interpret it.
-  moduleUrl: string;
-  // If present, posted to the worklet port immediately after the node is
-  // constructed and before the {ready} handshake. Use for engines whose
-  // init bytes must come from the main thread (no fetch in worklet scope).
-  // Typed as object to make a stray `null` a compile error — `null` would
-  // satisfy a `unknown` check but post a meaningless message.
-  initPayload?: Record<string, unknown>;
-};
-
-export type WorkletDenoiserConfig = {
+type WorkletDenoiserConfig = {
   id: DenoiserId;
   label: string;
   processorName: string;
-  // 48000 unless an engine explicitly supports another rate.
-  sampleRate?: number;
-  // How long to wait for the worklet's {ready} reply before giving up.
-  // Heavier engines (large WASM compile, model graph init) need a wider
-  // budget; RNNoise uses the 3s default.
-  initTimeoutMs?: number;
-  preloadAssets: () => Promise<WorkletDenoiserAssets>;
+  // Fetches the worklet module; resolves to the URL for addModule().
+  loadModule: () => Promise<string>;
 };
 
 export function createWorkletDenoiser(cfg: WorkletDenoiserConfig): Denoiser {
-  const sampleRate = cfg.sampleRate ?? DEFAULT_SAMPLE_RATE;
-  const initTimeoutMs = cfg.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT_MS;
   const tag = `[${cfg.id}]`;
 
-  let cachedAssets: WorkletDenoiserAssets | null = null;
-  let cachedReady = false;
-  let cachedPromise: Promise<WorkletDenoiserAssets> | null = null;
+  let moduleUrl: string | null = null;
+  let loading: Promise<string> | null = null;
 
-  function preload(): Promise<void> {
-    if (cachedReady) return Promise.resolve();
-    if (!cachedPromise) {
-      cachedPromise = cfg
-        .preloadAssets()
-        .then((assets) => {
-          cachedAssets = assets;
-          cachedReady = true;
-          return assets;
-        })
-        .catch((err: unknown) => {
-          cachedPromise = null;
+  function load(): Promise<string> {
+    if (!loading) {
+      loading = cfg.loadModule().then(
+        (url) => (moduleUrl = url),
+        (err: unknown) => {
+          loading = null;
           throw err;
-        });
+        },
+      );
     }
-    return cachedPromise.then(() => undefined);
+    return loading;
   }
 
-  // addModule is per-AudioContext; multiple create() calls within the same
-  // context share one registration. Tracked via WeakMap so the entry is GC'd
-  // when the context goes away.
-  const workletRegistry = new WeakMap<AudioContext, Promise<void>>();
+  // addModule is per AudioContext; every node in a context shares one registration.
+  const registered = new WeakMap<AudioContext, Promise<void>>();
 
-  function ensureRegistered(ctx: AudioContext, moduleUrl: string): Promise<void> {
-    let p = workletRegistry.get(ctx);
+  function ensureRegistered(ctx: AudioContext, url: string): Promise<void> {
+    let p = registered.get(ctx);
     if (p) return p;
-    p = ctx.audioWorklet.addModule(moduleUrl).catch((err: unknown) => {
-      workletRegistry.delete(ctx);
+    p = ctx.audioWorklet.addModule(url).catch((err: unknown) => {
+      registered.delete(ctx);
       throw err;
     });
-    workletRegistry.set(ctx, p);
+    registered.set(ctx, p);
     return p;
   }
 
   async function create(ctx: AudioContext): Promise<DenoiserNode | null> {
-    if (ctx.sampleRate !== sampleRate) {
-      console.warn(`${tag} disabled: sampleRate=${ctx.sampleRate} (need ${sampleRate})`);
+    if (ctx.sampleRate !== SAMPLE_RATE) {
+      console.warn(`${tag} disabled: sampleRate=${ctx.sampleRate} (need ${SAMPLE_RATE})`);
       return null;
     }
 
-    let assets: WorkletDenoiserAssets;
+    let url: string;
     try {
-      await preload();
-      if (!cachedAssets) return null;
-      assets = cachedAssets;
+      url = await load();
     } catch (err) {
       console.error(`${tag} preload failed:`, err);
       return null;
     }
 
     try {
-      await ensureRegistered(ctx, assets.moduleUrl);
+      await ensureRegistered(ctx, url);
     } catch (err) {
       console.error(`${tag} addModule failed:`, err);
       return null;
@@ -141,24 +95,15 @@ export function createWorkletDenoiser(cfg: WorkletDenoiserConfig): Denoiser {
       node.port.start();
     });
 
-    if (assets.initPayload !== undefined) {
-      // Structured-clone copies — keeps cached bytes valid for future contexts.
-      node.port.postMessage(assets.initPayload);
-    }
-
     const timeout = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error(`${cfg.id} init timeout`)), initTimeoutMs);
+      setTimeout(() => reject(new Error(`${cfg.id} init timeout`)), INIT_TIMEOUT_MS);
     });
 
     try {
       await Promise.race([ready, timeout]);
     } catch (err) {
       console.warn(`${tag} init failed:`, err);
-      try {
-        node.disconnect();
-      } catch {
-        /* ignore */
-      }
+      node.disconnect();
       return null;
     }
 
@@ -166,16 +111,8 @@ export function createWorkletDenoiser(cfg: WorkletDenoiserConfig): Denoiser {
       input: node,
       output: node,
       dispose() {
-        try {
-          node.port.postMessage({ type: 'destroy' });
-        } catch {
-          /* ignore */
-        }
-        try {
-          node.disconnect();
-        } catch {
-          /* ignore */
-        }
+        node.port.postMessage({ type: 'destroy' });
+        node.disconnect();
       },
     };
   }
@@ -183,8 +120,8 @@ export function createWorkletDenoiser(cfg: WorkletDenoiserConfig): Denoiser {
   return {
     id: cfg.id,
     label: cfg.label,
-    preload,
-    isReady: () => cachedReady,
+    preload: () => load().then(() => undefined),
+    isReady: () => moduleUrl !== null,
     create,
   };
 }

@@ -30,30 +30,26 @@ import { useLurkerWS } from './hooks/useLurkerWS';
 import { useIsMobile } from './hooks/useIsMobile';
 import { MobileLayout } from './components/MobileLayout';
 
+// Shared gate for the in-window and Tauri OS-level hotkey paths: on a focus
+// race both can fire for one press.
+const TOGGLE_COOLDOWN_MS = 60;
+
 export function App() {
   // App does not render any store field directly — children subscribe per-card.
   // Callbacks read fresh state via useStore.getState() to avoid re-rendering App
   // (and recreating every handler) on every speaking/participant update.
   const audio = useAudioEngine();
   const sfu = useSFU();
-  const { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState } = useAppVersion();
+  const { bootVersion, update, applyDesktopUpdate, desktopApplyState } = useAppVersion();
   const isMobile = useIsMobile();
 
-  // Display name local state (synced to localStorage).
   const [displayName, setDisplayName] = useState<string>(() =>
     loadOrCreateDisplayName(makeGuestName),
   );
 
-  // ---- Toggle handlers ----
-
-  // Single dedup gate shared between in-window keyboard listener and the Tauri
-  // OS-level event bridge. Each path has its own short-circuit; this is the
-  // authoritative gate against a focus-race where both paths fire together.
   const lastToggleAtRef = useRef(0);
-  const TOGGLE_COOLDOWN_MS = 60;
-
-  // triggerToggleSelfMute needs session, but session is defined below.
-  // We break the cycle with a stable ref, same pattern as the hook itself.
+  // triggerToggleSelfMute is needed to build session, but the handler it calls
+  // needs session — a ref breaks the cycle.
   const handleToggleSelfMuteRef = useRef<() => void>(() => undefined);
 
   const triggerToggleSelfMute = useCallback(() => {
@@ -64,9 +60,6 @@ export function App() {
   }, []);
 
   useGlobalShortcut(triggerToggleSelfMute);
-
-  // ---- Session manager ----
-  // Owns join/leave/reconnect/config/Tauri event subscription/mic actions.
 
   const session = useSessionManager({
     audio,
@@ -92,8 +85,6 @@ export function App() {
     else playUnmuteSound();
   }, [audio, session]);
 
-  // Keep the ref in sync so triggerToggleSelfMute (defined before session) can
-  // call the latest version without capturing session in its own dep array.
   handleToggleSelfMuteRef.current = handleToggleSelfMute;
 
   const handleToggleDeafen = useCallback(() => {
@@ -115,8 +106,6 @@ export function App() {
     }
     audio.applyAllRemoteGains();
   }, [audio, session]);
-
-  // ---- Engine switch ----
 
   const handleEngineSelect = useCallback(
     async (engine: EngineKind) => {
@@ -144,8 +133,6 @@ export function App() {
     },
     [session],
   );
-
-  // ---- Mic device switch ----
 
   const handleMicDeviceSelect = useCallback(
     async (deviceId: string | null) => {
@@ -179,8 +166,6 @@ export function App() {
     },
     [audio],
   );
-
-  // ---- Audio controls ----
 
   const handleSendVolumeChange = useCallback(
     (v: number) => {
@@ -220,8 +205,6 @@ export function App() {
     const s = useStore.getState();
     s.setStatus(msg, false, s.joinState === 'joined');
   }, []);
-
-  // ---- Display name sync back to SFU ----
 
   const handleDisplayNameChange = useCallback(
     (value: string) => {
@@ -264,7 +247,7 @@ export function App() {
 
   const handlePingUser = useCallback(
     (targetId: string): void => {
-      const s = useStore.getState(); // snapshot read, not subscription
+      const s = useStore.getState();
       const last = s.lastPingSentByTarget.get(targetId) ?? 0;
       if (Date.now() - last < 10000) return;
       if (voiceActive) session.sendPing(targetId);
@@ -327,7 +310,6 @@ export function App() {
   const updateBanner = (
     <UpdateBanner
       update={update}
-      reload={reload}
       applyDesktopUpdate={applyDesktopUpdate}
       desktopApplyState={desktopApplyState}
     />

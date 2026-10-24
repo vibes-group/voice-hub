@@ -32,11 +32,9 @@ vi.hoisted(() => {
 });
 
 vi.mock('../screenshare/codec', () => ({
-  primeScreenCodecProfile: () => Promise.resolve(),
   chooseScreenCodec: () => 'av1',
   canReceiveScreenCodec: () => true,
   applyScreenCodecPreferences: () => undefined,
-  isScreenVideoCodec: (v: unknown) => v === 'av1' || v === 'vp9',
 }));
 
 import { createSFUClient, createChatClient } from './client';

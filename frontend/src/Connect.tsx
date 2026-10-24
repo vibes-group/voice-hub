@@ -34,7 +34,7 @@ export function Connect() {
   }
 
   return (
-    <main className="card card-lg w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,24px)]">
+    <main className="card w-[min(400px,100%)] p-8 mx-auto mt-[max(18vh,24px)]">
       <div className="flex items-center gap-2.5 mb-6">
         <AudioWaveform size={22} className="text-accent" />
         <span className="font-extrabold text-[16px] uppercase tracking-[0.2em] text-accent">

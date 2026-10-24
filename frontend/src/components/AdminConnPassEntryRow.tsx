@@ -47,14 +47,20 @@ interface Props {
   onSetTTL: (id: string, ttlSeconds: number) => void;
 }
 
-export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevoke, onSetTTL }: Props) {
-  const [renamingID, setRenamingID] = useState<string | null>(null);
+export function AdminConnPassEntryRow({
+  entry,
+  busy,
+  onRotate,
+  onRename,
+  onRevoke,
+  onSetTTL,
+}: Props) {
+  const [editing, setEditing] = useState<'rename' | 'ttl' | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [ttlEditingID, setTtlEditingID] = useState<string | null>(null);
 
   const commitRename = () => {
     onRename(entry.id, renameValue);
-    setRenamingID(null);
+    setEditing(null);
   };
 
   return (
@@ -62,7 +68,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
       className={`flex items-center gap-2 px-3 py-2 bg-bg-0 border ${entry.expired ? 'border-[rgba(248,113,113,0.3)] opacity-60' : 'border-line'}`}
     >
       <div className="flex-1 min-w-0">
-        {renamingID === entry.id ? (
+        {editing === 'rename' ? (
           <div className="flex items-center gap-1">
             <input
               type="text"
@@ -70,7 +76,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
               onChange={(e) => setRenameValue(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') setRenamingID(null);
+                if (e.key === 'Escape') setEditing(null);
               }}
               maxLength={64}
               className="flex-1 bg-bg-1 border border-line px-2 py-1 text-[12px] mobile:text-[16px] text-text focus:border-accent outline-none"
@@ -87,7 +93,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
             </button>
             <button
               type="button"
-              onClick={() => setRenamingID(null)}
+              onClick={() => setEditing(null)}
               className="p-1 mobile:p-2.5 text-muted hover:bg-[rgba(255,255,255,0.04)]"
               title="Отмена"
             >
@@ -100,17 +106,19 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
               {entry.label || <span className="text-muted-2 italic">без названия</span>}
             </div>
             <div className="text-muted-2 text-[11px] flex items-center gap-1.5">
-              <span>{relativeTime(entry.created_at)} · #{entry.generation}</span>
+              <span>
+                {relativeTime(entry.created_at)} · #{entry.generation}
+              </span>
               <span className={entry.expired ? 'text-danger' : ''}>· {expiryLabel(entry)}</span>
             </div>
           </>
         )}
       </div>
-      {renamingID !== entry.id && ttlEditingID !== entry.id && (
+      {editing === null && (
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
-            onClick={() => setTtlEditingID(entry.id)}
+            onClick={() => setEditing('ttl')}
             disabled={busy}
             className="p-1.5 mobile:p-2.5 text-muted-2 hover:text-text hover:bg-[rgba(255,255,255,0.04)]"
             title="Изменить срок"
@@ -120,7 +128,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
           <button
             type="button"
             onClick={() => {
-              setRenamingID(entry.id);
+              setEditing('rename');
               setRenameValue(entry.label);
             }}
             disabled={busy}
@@ -149,7 +157,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
           </button>
         </div>
       )}
-      {ttlEditingID === entry.id && (
+      {editing === 'ttl' && (
         <div className="flex items-center gap-1 shrink-0">
           <select
             defaultValue=""
@@ -158,13 +166,15 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
               const v = Number(e.target.value);
               if (!Number.isNaN(v)) {
                 onSetTTL(entry.id, v);
-                setTtlEditingID(null);
+                setEditing(null);
               }
             }}
             className="bg-bg-1 border border-line px-2 py-1 text-[12px] mobile:text-[16px] text-text focus:border-accent outline-none"
             autoFocus
           >
-            <option value="" disabled>Срок…</option>
+            <option value="" disabled>
+              Срок…
+            </option>
             {TTL_PRESETS.map((p) => (
               <option key={p.value} value={p.value}>
                 {p.label}
@@ -173,7 +183,7 @@ export function AdminConnPassEntryRow({ entry, busy, onRotate, onRename, onRevok
           </select>
           <button
             type="button"
-            onClick={() => setTtlEditingID(null)}
+            onClick={() => setEditing(null)}
             className="p-1 mobile:p-2.5 text-muted hover:bg-[rgba(255,255,255,0.04)]"
             title="Отмена"
           >

@@ -19,16 +19,9 @@
   --color-muted: #9aa8a2;
   --color-muted-2: #6b7872;
   --color-accent: #4be277;
-  --color-accent-hover: #6bff8f;
-  --color-accent-strong: #22c55e;
   --color-accent-ink: #050505;
   --color-good: #4be277;
   --color-danger: #f87171;
-
-  --radius-card: 0;
-  --radius-card-lg: 0;
-
-  --shadow-card: 0 0 0 0 transparent;
 
   --font-sans: 'Manrope Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
@@ -96,16 +89,8 @@
     @apply relative p-5 border border-line bg-bg-1;
   }
 
-  .card-lg {
-    /* sharp corners — alias kept for semantic grouping. */
-  }
-
   .card-title {
     @apply m-0 text-[16px] font-bold uppercase tracking-[0.18em] text-muted;
-  }
-
-  .card-hint {
-    @apply text-[12px] text-muted-2 uppercase tracking-[0.12em];
   }
 
   .section-label {
@@ -139,12 +124,6 @@
     @apply px-2.5 py-1.5 text-[11px];
   }
 
-  .btn-toggle-on {
-    @apply bg-[rgba(248,113,113,0.1)] border-danger text-danger
-      hover:bg-danger hover:text-accent-ink;
-  }
-
-  /* CONNECT-style hero button: full-width, taller, sensors icon on right. */
   .btn-hero {
     @apply w-full justify-center gap-3 py-[18px] text-[18px] tracking-[0.2em];
   }
@@ -155,20 +134,6 @@
       transition-[border-color,background] duration-150
       placeholder:text-muted-2
       focus:outline-none focus:border-accent;
-  }
-
-  /* Underline-only input (some-ui-elements style). */
-  .input-underline {
-    @apply w-full bg-transparent border-0 border-b border-line px-0 py-3
-      text-text text-[20px] font-semibold
-      transition-colors duration-150
-      placeholder:text-muted-2
-      focus:outline-none focus:border-accent;
-  }
-
-  .kbd {
-    @apply inline-block px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.1em]
-      text-accent bg-bg-input border border-line;
   }
 
   /* Range slider — thin track, square green thumb, sharp aesthetic. */
@@ -307,8 +272,7 @@
       inset: -10px;
     }
   }
-  .vh-toggle[aria-checked='true']:hover,
-  .vh-toggle[data-checked='true']:hover {
+  .vh-toggle[aria-checked='true']:hover {
     filter: brightness(1.2);
   }
   .vh-toggle-dot {
@@ -319,65 +283,21 @@
   .vh-toggle .vh-toggle-dot:hover {
     transform: translateX(3px);
   }
-  .vh-toggle[aria-checked='true'],
-  .vh-toggle[data-checked='true'] {
+  .vh-toggle[aria-checked='true'] {
     background-color: var(--color-accent);
     border-color: var(--color-accent);
   }
-  .vh-toggle[aria-checked='true'] .vh-toggle-dot,
-  .vh-toggle[data-checked='true'] .vh-toggle-dot {
+  .vh-toggle[aria-checked='true'] .vh-toggle-dot {
     transform: translateX(24px);
     background-color: var(--color-bg-0);
   }
-  .vh-toggle[aria-checked='true'] .vh-toggle-dot:hover,
-  .vh-toggle[data-checked='true'] .vh-toggle-dot:hover {
+  .vh-toggle[aria-checked='true'] .vh-toggle-dot:hover {
     transform: translateX(21px);
   }
   .vh-toggle:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--color-accent);
   }
-
-  /* Round hardware toggle — 80x80 circle, glow when active (some-ui-elements). */
-  .vh-hw {
-    @apply relative inline-flex items-center justify-center w-20 h-20
-      rounded-full border-2 cursor-pointer transition-all duration-150
-      active:scale-95;
-  }
-  .vh-hw-on {
-    @apply border-accent text-accent bg-[rgba(75,226,119,0.1)]
-      shadow-[0_0_24px_rgba(75,226,119,0.25)];
-  }
-  .vh-hw-off {
-    @apply border-line text-muted-2 bg-bg-1
-      hover:border-muted hover:text-muted;
-  }
-  .vh-hw-danger {
-    @apply border-danger text-danger bg-[rgba(248,113,113,0.08)]
-      hover:bg-[rgba(248,113,113,0.16)];
-  }
-}
-
-.fs-wrap:fullscreen,
-.fs-wrap:-webkit-full-screen {
-  display: grid;
-  place-items: center;
-  background: black;
-}
-.fs-wrap:fullscreen video,
-.fs-wrap:-webkit-full-screen video {
-  width: 100%;
-  height: 100%;
-  aspect-ratio: auto;
-  object-fit: contain;
-}
-
-.fs-exit {
-  display: none;
-}
-.fs-wrap:fullscreen .fs-exit,
-.fs-wrap:-webkit-full-screen .fs-exit {
-  display: grid;
 }
 
 @keyframes vh-pulse {

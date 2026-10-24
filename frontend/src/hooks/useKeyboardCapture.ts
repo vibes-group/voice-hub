@@ -14,46 +14,31 @@ export type HotkeyApi = {
 // Capture commits on release of the LAST held key (Discord-style). Modifier-
 // only combos are allowed. We accumulate the "peak" set so brief overlaps
 // during release don't truncate the recorded combo.
-
-type CaptureSnapshot = {
-  liveKeys: string[];
-  pressedCodes: Set<string>;
-  peakKeys: string[];
-};
-
 export function useKeyboardCapture(opts: {
   active: boolean;
   onCommit: (binding: InputBinding) => void;
   onLiveChange: (keys: string[]) => void;
 }) {
   const { active, onCommit, onLiveChange } = opts;
-  const stateRef = useRef<CaptureSnapshot>({
-    liveKeys: [],
-    pressedCodes: new Set(),
-    peakKeys: [],
-  });
+  const stateRef = useRef({ pressedCodes: new Set<string>(), peakKeys: [] as string[] });
 
   useEffect(() => {
     if (!active) {
-      stateRef.current = { liveKeys: [], pressedCodes: new Set(), peakKeys: [] };
+      stateRef.current = { pressedCodes: new Set(), peakKeys: [] };
       onLiveChange([]);
       return;
     }
 
     function recompute() {
-      const codes = Array.from(stateRef.current.pressedCodes);
-      const labels = canonicalizeKeys(
-        codes.map((c) => labelFromCode(c)).filter((l): l is string => l !== null),
+      const keys = canonicalizeKeys(
+        Array.from(stateRef.current.pressedCodes, labelFromCode).filter(
+          (l): l is string => l !== null,
+        ),
       );
-      // Dedupe while preserving order.
-      const seen = new Set<string>();
-      const unique = labels.filter((l) => (seen.has(l) ? false : (seen.add(l), true)));
-      stateRef.current.liveKeys = unique;
-      // Track peak set: if current size >= peak size, update peak.
-      if (unique.length >= stateRef.current.peakKeys.length) {
-        stateRef.current.peakKeys = unique;
+      if (keys.length >= stateRef.current.peakKeys.length) {
+        stateRef.current.peakKeys = keys;
       }
-      onLiveChange(unique);
+      onLiveChange(keys);
     }
 
     function onKeyDown(e: KeyboardEvent) {
@@ -82,7 +67,6 @@ export function useKeyboardCapture(opts: {
       // a stuck modifier on return.
       stateRef.current.pressedCodes.clear();
       stateRef.current.peakKeys = [];
-      stateRef.current.liveKeys = [];
       onLiveChange([]);
     }
 

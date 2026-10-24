@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../store/useStore';
 import { defaultBinding, formatBinding, type InputBinding } from '../utils/binding';
@@ -68,8 +68,8 @@ export function useTauriHotkey(onStatusMessage: (msg: string) => void): HotkeyAp
     }
   }, [capturing]);
 
-  const onCommit = useMemo(
-    () => async (b: InputBinding) => {
+  const onCommit = useCallback(
+    async (b: InputBinding) => {
       try {
         await Promise.all([invoke('set_shortcut', { binding: b }), invoke('cancel_capture')]);
         setShortcut(b);

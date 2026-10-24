@@ -12,9 +12,8 @@
 // Shared
 
 /**
- * PCKind discriminates the RTCPeerConnection role every offer / answer /
- * candidate message targets. Required on every signaling message — a missing
- * value is a wire-format bug, not a default. Mirror of protocol.PCKind in Go.
+ * The RTCPeerConnection an offer / answer / candidate targets. Required on
+ * every signaling message — a missing value is a wire-format bug, not a default.
  *
  *  - audio       → the single audio PC each peer maintains
  *  - screen-pub  → the publisher's screen-share PC (one per active share)
@@ -113,8 +112,6 @@ export type PeerLeftPayload = {
 export type AudioSlotsPayload = {
   slots: { slot: string; peerId: string | null }[];
 };
-
-// peer-joined and peer-info reuse PeerInfo directly (no wrapper).
 
 /** Data field of "peer-state" — broadcast when a peer's mic/deafen state changes. */
 export type PeerStatePayload = {
@@ -318,12 +315,12 @@ export type ScreenShareEncodeLayersPayload = {
   layers: number[];
 };
 
-// Discriminated union — all server→client variants
-
 export type PingPayload = {
   from: string;
   fromName: string;
 };
+
+// Discriminated union — all server→client variants
 
 export type ServerMessage =
   | { event: 'welcome'; data: WelcomePayload }
@@ -348,7 +345,7 @@ export type ServerMessage =
   | { event: 'screen-share-encode-resume'; data: ScreenShareEncodeLayersPayload }
   | { event: 'screen-share-mode-changed'; data: ScreenShareModeChangedPayload };
 
-// ClientMessage union (used in send helpers)
+// All client→server variants; typed `send` in client.ts checks against it.
 
 export type ClientMessage =
   | { event: 'hello'; data: HelloPayload }
@@ -376,26 +373,15 @@ export type ClientMessage =
 
 // Runtime guard — parses raw WS text into a typed ServerMessage
 
-/**
- * Parses a raw WebSocket message string into a typed ServerMessage.
- *
- * Returns null (never throws) on:
- *   - malformed JSON
- *   - missing/wrong-typed envelope fields
- *   - unknown event name (protocol may grow — unknown events are ignored)
- *   - missing required payload fields
- *
- * A console.warn is emitted on every failure path to aid debugging.
- */
 function isPCKind(v: unknown): v is PCKind {
   return v === 'audio' || v === 'screen-pub' || v === 'screen-sub';
 }
 
-function isScreenVideoCodec(v: unknown): v is ScreenVideoCodec {
+export function isScreenVideoCodec(v: unknown): v is ScreenVideoCodec {
   return v === 'av1' || v === 'vp9';
 }
 
-function isScreenShareMode(v: unknown): v is ScreenShareMode {
+export function isScreenShareMode(v: unknown): v is ScreenShareMode {
   return v === 'sharp' || v === 'motion';
 }
 
@@ -411,6 +397,58 @@ function isValidAttachment(v: unknown): v is Attachment {
   );
 }
 
+type Fields = Record<string, unknown>;
+
+const hasId = (d: Fields) => typeof d.id === 'string';
+const isSessionDescription = (d: Fields) =>
+  typeof d.type === 'string' && typeof d.sdp === 'string' && isPCKind(d.pc);
+const hasLayers = (d: Fields) => Array.isArray(d.layers);
+
+// Checks the required payload fields of every known server event.
+const VALID_PAYLOAD: Record<ServerMessage['event'], (d: Fields) => boolean> = {
+  welcome: (d) => hasId(d) && Array.isArray(d.peers),
+  'peer-joined': hasId,
+  'peer-info': hasId,
+  'peer-left': hasId,
+  'peer-state': (d) =>
+    hasId(d) && typeof d.selfMuted === 'boolean' && typeof d.deafened === 'boolean',
+  'audio-slots': (d) =>
+    Array.isArray(d.slots) &&
+    d.slots.every(
+      (s: { slot?: unknown; peerId?: unknown } | null) =>
+        typeof s?.slot === 'string' && (s.peerId === null || typeof s.peerId === 'string'),
+    ),
+  offer: isSessionDescription,
+  answer: isSessionDescription,
+  candidate: (d) => typeof d.candidate === 'string' && isPCKind(d.pc),
+  'screen-share-started': (d) => typeof d.sessionToken === 'string',
+  'screen-share-available': (d) =>
+    typeof d.publisherId === 'string' &&
+    typeof d.hasSystemAudio === 'boolean' &&
+    (!('videoCodec' in d) || isScreenVideoCodec(d.videoCodec)) &&
+    (!('mode' in d) || isScreenShareMode(d.mode)),
+  'screen-share-mode-changed': (d) =>
+    typeof d.publisherId === 'string' && isScreenShareMode(d.mode),
+  'screen-share-ended': (d) => typeof d.publisherId === 'string',
+  'screen-share-error': (d) => typeof d.reason === 'string',
+  'screen-share-encode-pause': hasLayers,
+  'screen-share-encode-resume': hasLayers,
+  chat: (d) =>
+    typeof d.id === 'string' &&
+    typeof d.from === 'string' &&
+    typeof d.text === 'string' &&
+    typeof d.ts === 'number' &&
+    (d.attachments === undefined ||
+      (Array.isArray(d.attachments) && d.attachments.every(isValidAttachment))),
+  'chat-deleted': hasId,
+  ping: (d) => typeof d.from === 'string' && typeof d.fromName === 'string',
+};
+
+/**
+ * Parses a raw WebSocket message into a typed ServerMessage. Returns null and
+ * warns on malformed JSON, a missing event, an unknown event (the protocol may
+ * grow) or a payload without its required fields.
+ */
 export function parseServerMessage(raw: string): ServerMessage | null {
   let parsed: unknown;
   try {
@@ -420,247 +458,19 @@ export function parseServerMessage(raw: string): ServerMessage | null {
     return null;
   }
 
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    !('event' in parsed) ||
-    typeof (parsed as Record<string, unknown>).event !== 'string'
-  ) {
+  const { event, data } = (parsed ?? {}) as { event?: unknown; data?: unknown };
+  if (typeof event !== 'string') {
     console.warn("[protocol] message missing string 'event':", parsed);
     return null;
   }
-
-  const envelope = parsed as { event: string; data: unknown };
-  const { event, data } = envelope;
-
-  switch (event) {
-    case 'welcome': {
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof (data as Record<string, unknown>).id !== 'string' ||
-        !Array.isArray((data as Record<string, unknown>).peers)
-      ) {
-        console.warn("[protocol] malformed 'welcome' payload:", data);
-        return null;
-      }
-      return { event, data: data as WelcomePayload };
-    }
-
-    case 'peer-joined':
-    case 'peer-info': {
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof (data as Record<string, unknown>).id !== 'string'
-      ) {
-        console.warn('[protocol] malformed peer payload:', event, data);
-        return null;
-      }
-      return { event, data: data as PeerInfo };
-    }
-
-    case 'peer-state': {
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof (data as Record<string, unknown>).id !== 'string' ||
-        typeof (data as Record<string, unknown>).selfMuted !== 'boolean' ||
-        typeof (data as Record<string, unknown>).deafened !== 'boolean'
-      ) {
-        console.warn("[protocol] malformed 'peer-state' payload:", data);
-        return null;
-      }
-      return { event, data: data as PeerStatePayload };
-    }
-
-    case 'peer-left': {
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof (data as Record<string, unknown>).id !== 'string'
-      ) {
-        console.warn("[protocol] malformed 'peer-left' payload:", data);
-        return null;
-      }
-      return { event, data: data as PeerLeftPayload };
-    }
-
-    case 'audio-slots': {
-      const slots = (data as Record<string, unknown> | null)?.slots;
-      const valid =
-        Array.isArray(slots) &&
-        slots.every((s: { slot?: unknown; peerId?: unknown } | null) => {
-          return typeof s?.slot === 'string' && (s.peerId === null || typeof s.peerId === 'string');
-        });
-      if (!valid) {
-        console.warn("[protocol] malformed 'audio-slots' payload:", data);
-        return null;
-      }
-      return { event, data: data as AudioSlotsPayload };
-    }
-
-    case 'offer': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.type !== 'string' ||
-        typeof d.sdp !== 'string' ||
-        !isPCKind(d.pc)
-      ) {
-        console.warn("[protocol] malformed 'offer' payload:", data);
-        return null;
-      }
-      return { event, data: data as OfferEnvelope };
-    }
-
-    case 'answer': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.type !== 'string' ||
-        typeof d.sdp !== 'string' ||
-        !isPCKind(d.pc)
-      ) {
-        console.warn("[protocol] malformed 'answer' payload:", data);
-        return null;
-      }
-      return { event, data: data as AnswerEnvelope };
-    }
-
-    case 'candidate': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.candidate !== 'string' ||
-        !isPCKind(d.pc)
-      ) {
-        console.warn("[protocol] malformed 'candidate' payload:", data);
-        return null;
-      }
-      return { event, data: data as CandidateEnvelope };
-    }
-
-    case 'screen-share-started': {
-      const d = data as Record<string, unknown>;
-      if (typeof data !== 'object' || data === null || typeof d.sessionToken !== 'string') {
-        console.warn("[protocol] malformed 'screen-share-started' payload:", data);
-        return null;
-      }
-      return { event, data: data as ScreenShareStartedPayload };
-    }
-
-    case 'screen-share-available': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.publisherId !== 'string' ||
-        typeof d.hasSystemAudio !== 'boolean' ||
-        ('videoCodec' in d && !isScreenVideoCodec(d.videoCodec)) ||
-        ('mode' in d && !isScreenShareMode(d.mode))
-      ) {
-        console.warn("[protocol] malformed 'screen-share-available' payload:", data);
-        return null;
-      }
-      return { event, data: data as ScreenShareAvailablePayload };
-    }
-
-    case 'screen-share-mode-changed': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.publisherId !== 'string' ||
-        !isScreenShareMode(d.mode)
-      ) {
-        console.warn("[protocol] malformed 'screen-share-mode-changed' payload:", data);
-        return null;
-      }
-      return { event, data: data as ScreenShareModeChangedPayload };
-    }
-
-    case 'screen-share-ended': {
-      const d = data as Record<string, unknown>;
-      if (typeof data !== 'object' || data === null || typeof d.publisherId !== 'string') {
-        console.warn("[protocol] malformed 'screen-share-ended' payload:", data);
-        return null;
-      }
-      return { event, data: data as ScreenShareEndedPayload };
-    }
-
-    case 'screen-share-error': {
-      const d = data as Record<string, unknown>;
-      if (typeof data !== 'object' || data === null || typeof d.reason !== 'string') {
-        console.warn("[protocol] malformed 'screen-share-error' payload:", data);
-        return null;
-      }
-      return { event, data: data as ScreenShareErrorPayload };
-    }
-
-    case 'screen-share-encode-pause':
-    case 'screen-share-encode-resume': {
-      const d = data as Record<string, unknown>;
-      if (typeof data !== 'object' || data === null || !Array.isArray(d.layers)) {
-        console.warn('[protocol] malformed payload:', event, data);
-        return null;
-      }
-      return { event, data: data as ScreenShareEncodeLayersPayload };
-    }
-
-    case 'chat': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.id !== 'string' ||
-        typeof d.from !== 'string' ||
-        typeof d.text !== 'string' ||
-        typeof d.ts !== 'number'
-      ) {
-        console.warn("[protocol] malformed 'chat' payload:", data);
-        return null;
-      }
-      if (d.attachments !== undefined) {
-        if (!Array.isArray(d.attachments) || !d.attachments.every(isValidAttachment)) {
-          console.warn("[protocol] malformed 'chat' attachments:", data);
-          return null;
-        }
-      }
-      return { event, data: data as ChatPayload };
-    }
-
-    case 'chat-deleted': {
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof (data as Record<string, unknown>).id !== 'string'
-      ) {
-        console.warn("[protocol] malformed 'chat-deleted' payload:", data);
-        return null;
-      }
-      return { event, data: data as ChatDeletedPayload };
-    }
-
-    case 'ping': {
-      const d = data as Record<string, unknown>;
-      if (
-        typeof data !== 'object' ||
-        data === null ||
-        typeof d.from !== 'string' ||
-        typeof d.fromName !== 'string'
-      ) {
-        console.warn("[protocol] malformed 'ping' payload:", data);
-        return null;
-      }
-      return { event, data: data as PingPayload };
-    }
-
-    default:
-      console.warn('[protocol] unknown server event:', event);
-      return null;
+  if (!Object.prototype.hasOwnProperty.call(VALID_PAYLOAD, event)) {
+    console.warn('[protocol] unknown server event:', event);
+    return null;
   }
+  const valid = VALID_PAYLOAD[event as ServerMessage['event']];
+  if (typeof data !== 'object' || data === null || !valid(data as Fields)) {
+    console.warn(`[protocol] malformed '${event}' payload:`, data);
+    return null;
+  }
+  return { event, data } as ServerMessage;
 }

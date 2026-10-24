@@ -1,6 +1,5 @@
-// Imperative facade over the local audio graph.
-// Owns refs to AudioContext, MicGraph, and remote audio nodes.
-// Does NOT put AudioNode instances into zustand.
+// Imperative owner of the mic graph, remote audio nodes and their
+// AudioContexts — kept out of zustand.
 
 import { useRef, useCallback } from 'react';
 import { useStore } from '../store/useStore';
@@ -47,8 +46,6 @@ export function useAudioEngine() {
     remoteAudioCtx: null,
     speakingLoop: createSpeakingLoop(),
   });
-
-  // ---- Mic graph ----
 
   const openMicStream = useCallback(async (engine: EngineKind): Promise<MediaStream> => {
     const deviceId = useStore.getState().micDeviceId;
@@ -173,42 +170,28 @@ export function useAudioEngine() {
       const r = refs.current;
       const oldGraph = r.micGraph;
       const { stream: rawStream, captureModeChanged } = await prepareRawMicForEngine(engine);
+      const rollback = () => {
+        if (captureModeChanged) clearRawMic();
+        else r.micGraph = oldGraph;
+      };
       r.micGraph = null;
       let graph: MicGraph;
       try {
         graph = await buildGraph(engine, undefined, rawStream);
       } catch (err) {
-        if (captureModeChanged) {
-          clearRawMic();
-        } else {
-          r.micGraph = oldGraph;
-        }
+        rollback();
         throw err;
       }
-      const newTrack = graph.processedLocalStream.getAudioTracks()[0];
-      if (!newTrack) {
+      try {
+        const newTrack = graph.processedLocalStream.getAudioTracks()[0];
+        if (!newTrack) throw new Error('No audio track after rebuild');
+        newTrack.enabled = !selfMuted;
+        const sender = getAudioSender(getSFUPeerConnection());
+        if (sender) await sender.replaceTrack(newTrack);
+      } catch (err) {
         teardownMicGraph(graph);
-        if (captureModeChanged) {
-          clearRawMic();
-        } else {
-          r.micGraph = oldGraph;
-        }
-        throw new Error('No audio track after rebuild');
-      }
-      newTrack.enabled = !selfMuted;
-      const sender = getAudioSender(getSFUPeerConnection());
-      if (sender) {
-        try {
-          await sender.replaceTrack(newTrack);
-        } catch (err) {
-          teardownMicGraph(graph);
-          if (captureModeChanged) {
-            clearRawMic();
-          } else {
-            r.micGraph = oldGraph;
-          }
-          throw err;
-        }
+        rollback();
+        throw err;
       }
       if (!captureModeChanged && oldGraph) {
         r.speakingLoop.unregister(LOCAL_SPEAKING_ID);
@@ -262,8 +245,6 @@ export function useAudioEngine() {
     [],
   );
 
-  // ---- Remote audio ----
-
   const applyAllRemoteGains = useCallback(() => {
     const r = refs.current;
     const { outputVolume, deafened, participants } = useStore.getState();
@@ -282,13 +263,11 @@ export function useAudioEngine() {
   const attachRemoteStream = useCallback(
     (participantId: string, stream: MediaStream) => {
       const r = refs.current;
-      // Tear down existing audio for this participant if present.
       const existing = r.remoteAudio.get(participantId);
       if (existing) {
         r.speakingLoop.unregister(participantId);
         teardownParticipantAudio(existing);
       }
-      // Create the shared remote AudioContext lazily on first attach.
       if (!r.remoteAudioCtx) {
         r.remoteAudioCtx = createRemoteAudioContext();
         void routeToSpeaker(r.remoteAudioCtx);

@@ -1,8 +1,3 @@
-// Registry of all denoising engines. Adding a new engine means dropping a
-// new module beside this file and adding one entry here — every other call
-// site (mic-graph, useAudioEngine, storage, AudioCard, formatters) reads
-// from this map.
-
 import type { Denoiser, DenoiserId } from './types';
 import { rnnoise } from './rnnoise';
 

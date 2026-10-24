@@ -9,18 +9,12 @@ import type {
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
-type FrontendUpdate = { kind: 'frontend'; current: string; next: string };
 type DesktopUpdate = { kind: 'desktop'; version: string };
-export type AppUpdate = FrontendUpdate | DesktopUpdate;
-
-export type DesktopUpdateProgress = {
-  downloaded: number;
-  total: number | null;
-};
+export type AppUpdate = { kind: 'frontend' } | DesktopUpdate;
 
 export type DesktopApplyState =
   | { phase: 'idle' }
-  | { phase: 'downloading'; progress: DesktopUpdateProgress | null }
+  | { phase: 'downloading'; progress: UpdateProgressPayload | null }
   | { phase: 'installing' }
   | { phase: 'error'; message: string };
 
@@ -38,12 +32,11 @@ async function fetchVersion(): Promise<string | null> {
 export function useAppVersion(): {
   bootVersion: string | null;
   update: AppUpdate | null;
-  reload: () => void;
   applyDesktopUpdate: () => void;
   desktopApplyState: DesktopApplyState;
 } {
   const [bootVersion, setBootVersion] = useState<string | null>(null);
-  const [frontendNext, setFrontendNext] = useState<string | null>(null);
+  const [frontendChanged, setFrontendChanged] = useState(false);
   const [desktopUpdate, setDesktopUpdate] = useState<DesktopUpdate | null>(null);
   const [desktopApplyState, setDesktopApplyState] = useState<DesktopApplyState>({ phase: 'idle' });
 
@@ -62,7 +55,7 @@ export function useAppVersion(): {
       if (v) {
         setBootVersion((prev) => {
           if (prev === null) return v;
-          if (prev !== v) setFrontendNext(v);
+          if (prev !== v) setFrontendChanged(true);
           return prev;
         });
       }
@@ -99,10 +92,7 @@ export function useAppVersion(): {
           setDesktopApplyState((prev) => (prev.phase === 'error' ? prev : { phase: 'idle' }));
         }),
         listen<UpdateProgressPayload>('update-progress', (event) => {
-          setDesktopApplyState({
-            phase: 'downloading',
-            progress: { downloaded: event.payload.downloaded, total: event.payload.total },
-          });
+          setDesktopApplyState({ phase: 'downloading', progress: event.payload });
         }),
         listen<UpdateInstallingPayload>('update-installing', () => {
           setDesktopApplyState({ phase: 'installing' });
@@ -120,15 +110,7 @@ export function useAppVersion(): {
     };
   }, []);
 
-  const update: AppUpdate | null = desktopUpdate
-    ? desktopUpdate
-    : frontendNext && bootVersion
-      ? { kind: 'frontend', current: bootVersion, next: frontendNext }
-      : null;
-
-  const reload = () => {
-    window.location.reload();
-  };
+  const update: AppUpdate | null = desktopUpdate ?? (frontendChanged ? { kind: 'frontend' } : null);
 
   const applyDesktopUpdate = () => {
     setDesktopApplyState({ phase: 'downloading', progress: null });
@@ -140,5 +122,5 @@ export function useAppVersion(): {
     });
   };
 
-  return { bootVersion, update, reload, applyDesktopUpdate, desktopApplyState };
+  return { bootVersion, update, applyDesktopUpdate, desktopApplyState };
 }

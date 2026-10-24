@@ -15,14 +15,12 @@ export function Toggle({
       aria-label={ariaLabel}
       onClick={onChange}
       className="vh-toggle"
-      data-checked={checked}
     >
       <span className="vh-toggle-dot" />
     </button>
   );
 }
 
-// A labeled settings row: a section label on the left, a Toggle on the right.
 export function ToggleRow({
   label,
   checked,

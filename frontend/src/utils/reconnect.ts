@@ -1,86 +1,54 @@
-// Pure reconnect scheduler — no React, no DOM, no store.
-//
-// Owns the attempt counter and backoff timer. The hook or caller decides what
-// to do on each attempt (connectSfu etc.) and passes it in via `onAttempt`.
-//
-// Designed for testability in a node env (vi.useFakeTimers()).
+// Reconnect backoff scheduler, free of React/DOM/store so it can be tested
+// with fake timers. The caller supplies what an attempt does via `onAttempt`.
 
 export type ReconnectSchedulerOptions = {
-  /** Delay (ms) for attempt 0, 1, 2, … The last entry is the cap. */
+  /** Delay (ms) for attempt 0, 1, 2, … Once exhausted, onExhausted fires. */
   delays: readonly number[];
-  /**
-   * Called when a scheduled attempt fires. Receives the 0-based attempt index
-   * that is about to run. Must return a Promise: resolve = success (counter
-   * resets), reject = failure (next schedule is triggered).
-   */
+  /** Resolve = success (counter resets), reject = failure (next attempt is scheduled). */
   onAttempt: (attempt: number) => Promise<void>;
-  /**
-   * Called when all delay slots are exhausted without a successful connection.
-   * The scheduler stops — no further attempts are made.
-   */
   onExhausted: () => void;
-  /**
-   * Predicate checked right before each attempt fires. If it returns true the
-   * attempt is skipped and the scheduler stops (user left voluntarily).
-   */
+  /** Checked before scheduling and before each attempt fires; true stops the scheduler. */
   isLeaving: () => boolean;
 };
 
 export type ReconnectScheduler = {
-  /** Schedule the next reconnect attempt using the current attempt counter. */
+  /** Schedule the next attempt; no-op while one is already pending. */
   schedule: () => void;
   /** Cancel any pending timer and reset the counter. */
   reset: () => void;
-  /** Read-only view of the current attempt index (0-based). */
   readonly attemptIndex: number;
 };
 
 export function createReconnectScheduler(opts: ReconnectSchedulerOptions): ReconnectScheduler {
   let timerId: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
-  // Whether a schedule() call is already queued (timer pending).
-  let pending = false;
 
   function reset() {
-    if (timerId !== null) {
-      clearTimeout(timerId);
-      timerId = null;
-    }
+    if (timerId !== null) clearTimeout(timerId);
+    timerId = null;
     attempt = 0;
-    pending = false;
   }
 
   function schedule() {
-    if (opts.isLeaving()) return;
-    if (pending) return; // already queued
+    if (opts.isLeaving() || timerId !== null) return;
 
     const currentAttempt = attempt;
     if (currentAttempt >= opts.delays.length) {
       opts.onExhausted();
       return;
     }
-
-    const delay = opts.delays[currentAttempt];
     attempt = currentAttempt + 1;
-    pending = true;
 
     timerId = setTimeout(() => {
       timerId = null;
-      pending = false;
-
       if (opts.isLeaving()) return;
-
       opts.onAttempt(currentAttempt).then(
         () => {
-          // Success — reset counter so the next connection starts fresh.
           attempt = 0;
         },
-        () => {
-          // Failure — schedule next attempt.
-          schedule();
-        },
+        () => schedule(),
       );
-    }, delay);
+    }, opts.delays[currentAttempt]);
   }
 
   return {

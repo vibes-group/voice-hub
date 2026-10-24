@@ -1,5 +1,4 @@
 import type { EngineKind } from '../types';
-import { isCaptureEngine } from './engine';
 import { getDenoiser } from './denoisers/registry';
 import type { DenoiserNode } from './denoisers/types';
 
@@ -56,7 +55,7 @@ export async function buildMicGraph(
   let chainTail: AudioNode = localHighPassNode;
   let denoiser: DenoiserNode | null = null;
 
-  const denoiserDef = engine === 'off' || isCaptureEngine(engine) ? null : getDenoiser(engine);
+  const denoiserDef = getDenoiser(engine);
   if (denoiserDef) {
     denoiser = await denoiserDef.create(localAudioContext);
     if (denoiser) {
@@ -91,17 +90,7 @@ export async function buildMicGraph(
 }
 
 export function applySendGain(graph: MicGraph, sendVolumeRef: () => number): void {
-  const sendVolume = sendVolumeRef();
-  graph.localGainNode.gain.value = sendVolume / 100;
-}
-
-function safeDisconnect(node: { disconnect(): void } | null | undefined): void {
-  if (!node) return;
-  try {
-    node.disconnect();
-  } catch {
-    /* ignore */
-  }
+  graph.localGainNode.gain.value = sendVolumeRef() / 100;
 }
 
 export function teardownMicGraph(graph: MicGraph): void {
@@ -110,10 +99,10 @@ export function teardownMicGraph(graph: MicGraph): void {
     graph.denoiser = null;
   }
 
-  safeDisconnect(graph.localSourceNode);
-  safeDisconnect(graph.localHighPassNode);
-  safeDisconnect(graph.localGainNode);
-  safeDisconnect(graph.localMonitorAnalyser);
+  graph.localSourceNode.disconnect();
+  graph.localHighPassNode.disconnect();
+  graph.localGainNode.disconnect();
+  graph.localMonitorAnalyser.disconnect();
 
   graph.processedLocalStream.getTracks().forEach((t) => t.stop());
   void graph.localAudioContext.close().catch(() => undefined);

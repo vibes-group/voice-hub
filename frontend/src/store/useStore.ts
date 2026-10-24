@@ -1,10 +1,8 @@
-// Zustand store: reactive UI state.
-// Audio nodes are NOT stored here — they live in imperative refs inside useAudioEngine.
+// Reactive UI state. Audio nodes live in imperative refs inside useAudioEngine.
 
 import { create } from 'zustand';
 import type { EngineKind, ParticipantUI, Role } from '../types';
-import type { InputBinding } from '../utils/binding';
-import { loadBinding } from '../utils/binding';
+import { loadBinding, type InputBinding } from '../utils/binding';
 import {
   KEYS,
   loadBoolean,
@@ -14,8 +12,7 @@ import {
   loadNumber,
   loadRoomSlug,
   saveBoolean,
-  saveSendVolume,
-  saveOutputVolume,
+  saveNumber,
   saveEngine,
   saveMicDeviceId,
   saveSpeakerDeviceId,
@@ -31,7 +28,7 @@ import type { Attachment } from '../sfu/protocol';
 
 export type ChatMessage = PersistedChatMessage;
 
-export type JoinState = 'idle' | 'joining' | 'joined';
+type JoinState = 'idle' | 'joining' | 'joined';
 type StatusState = 'idle' | 'ok' | 'err';
 
 function compareParticipants(a: ParticipantUI, b: ParticipantUI): number {
@@ -103,11 +100,8 @@ export interface AppState {
   // Drives admin-only UI (AdminKeyButton) without a separate probe endpoint.
   role: Role | null;
 
-  // Mute/deafen are persistent (Discord-style — survive reload).
-  // There is no separate outputMuted field on purpose: the previous
-  // independently-persisted boolean caused an orphan-state trap (commit
-  // 9a7c196). Audio code that needs to know whether the local listener is
-  // muted reads `deafened` directly.
+  // Mute/deafen persist across reloads (Discord-style). Deafen is the only
+  // output-mute state; audio code reads `deafened` directly.
   selfMuted: boolean;
   setSelfMuted: (v: boolean) => void;
   deafened: boolean;
@@ -223,12 +217,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   sendVolume: loadNumber(KEYS.sendVolume, 100),
   setSendVolume: (v) => {
-    saveSendVolume(v);
+    saveNumber(KEYS.sendVolume, v);
     set({ sendVolume: v });
   },
   outputVolume: loadNumber(KEYS.outputVolume, 100),
   setOutputVolume: (v) => {
-    saveOutputVolume(v);
+    saveNumber(KEYS.outputVolume, v);
     set({ outputVolume: v });
   },
 
@@ -295,12 +289,9 @@ export const useStore = create<AppState>((set, get) => ({
   clearIncomingPing: () => set({ incomingPing: null }),
   lastPingSentByTarget: new Map(),
   markPingSent: (targetId) =>
-    set((s) => {
-      const now = Date.now();
-      const next = new Map(s.lastPingSentByTarget);
-      next.set(targetId, now);
-      return { lastPingSentByTarget: next };
-    }),
+    set((s) => ({
+      lastPingSentByTarget: new Map(s.lastPingSentByTarget).set(targetId, Date.now()),
+    })),
 
   participants: {},
   upsertParticipant: (partial) => {

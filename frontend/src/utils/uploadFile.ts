@@ -17,7 +17,7 @@ export class UploadError extends Error {
   }
 }
 
-export type UploadOptions = {
+type UploadOptions = {
   name: string;
   onProgress?: (fraction: number) => void;
   signal?: AbortSignal;

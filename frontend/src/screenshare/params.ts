@@ -1,8 +1,14 @@
+import type { ScreenShareMode, ScreenVideoCodec } from '../sfu/protocol';
+
+export {
+  isScreenVideoCodec as isScreenCodecPref,
+  isScreenShareMode as isShareMode,
+} from '../sfu/protocol';
+
 export type ScreenResolution = 'source' | '720' | '1080' | '1440' | '2160';
 export type ScreenFps = 15 | 30 | 60;
-export type ScreenCodecPref = 'av1' | 'vp9';
-
-export type ShareMode = 'sharp' | 'motion';
+export type ScreenCodecPref = ScreenVideoCodec;
+export type ShareMode = ScreenShareMode;
 
 export const SCREEN_RESOLUTIONS: readonly ScreenResolution[] = [
   'source',
@@ -28,14 +34,6 @@ export function isScreenFps(v: unknown): v is ScreenFps {
   return v === 15 || v === 30 || v === 60;
 }
 
-export function isScreenCodecPref(v: unknown): v is ScreenCodecPref {
-  return v === 'av1' || v === 'vp9';
-}
-
-export function isShareMode(v: unknown): v is ShareMode {
-  return v === 'sharp' || v === 'motion';
-}
-
 const DIMENSIONS: Record<ScreenResolution, { width: number; height: number }> = {
   source: { width: 3840, height: 2160 },
   '720': { width: 1280, height: 720 },
@@ -44,10 +42,8 @@ const DIMENSIONS: Record<ScreenResolution, { width: number; height: number }> = 
   '2160': { width: 3840, height: 2160 },
 };
 
-// Bitrate ceilings tuned for AV1/VP9 desktop capture with L1T3 SVC.
-// Pre-shareMode-modifier values — sharp scales these down to favour
-// cleaner static frames at lower CPU/network cost, motion keeps them
-// at full to let motion content render without smear.
+// Bitrate ceilings tuned for AV1/VP9 desktop capture with L1T3 SVC, before
+// the share-mode factor.
 const BITRATES: Record<ScreenResolution, Record<ScreenFps, number>> = {
   source: { 15: 8_000_000, 30: 14_000_000, 60: 20_000_000 },
   '720': { 15: 1_000_000, 30: 2_000_000, 60: 3_500_000 },
@@ -56,11 +52,8 @@ const BITRATES: Record<ScreenResolution, Record<ScreenFps, number>> = {
   '2160': { 15: 8_000_000, 30: 14_000_000, 60: 20_000_000 },
 };
 
-// SHARE_MODE_BITRATE_FACTOR scales the bitrate cap based on the share
-// mode. AV1's Screen Content Coding (intraBC + palette) makes static
-// text/code/docs encode at a small fraction of the motion budget — we
-// halve the cap for sharp and let the encoder coast well below it.
-// Motion content (games, videos) gets the full cap.
+// Static text/code encodes at a fraction of the motion budget, so sharp gets
+// half the cap; motion content (games, videos) gets all of it.
 const SHARE_MODE_BITRATE_FACTOR: Record<ShareMode, number> = {
   sharp: 0.5,
   motion: 1.0,
@@ -122,9 +115,6 @@ export function getPreset(id: ScreenPresetId): ScreenPreset {
   return found;
 }
 
-// 'text' biases the encoder toward sharp edges and stable text rendering at
-// the cost of motion smoothness. 'motion' is the inverse — accept blur on
-// frames to keep motion fluid. Mapping mirrors the shareMode contract.
 export function shareModeToContentHint(mode: ShareMode): 'text' | 'motion' {
   return mode === 'sharp' ? 'text' : 'motion';
 }

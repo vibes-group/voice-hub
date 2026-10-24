@@ -1,5 +1,6 @@
 import { parseServerMessage } from './protocol';
 import type {
+  ClientMessage,
   WelcomePayload,
   PeerInfo,
   PeerLeftPayload,
@@ -36,41 +37,21 @@ export type ChatOnlyClient = {
 
 export function closeWebSocket(ws: WebSocket): void {
   if (ws.readyState === WebSocket.CONNECTING) {
-    ws.onopen = () => {
-      try {
-        ws.close();
-      } catch {
-        /* ignore */
-      }
-    };
+    ws.onopen = () => ws.close();
   } else {
-    try {
-      ws.close();
-    } catch {
-      /* ignore */
-    }
+    ws.close();
   }
 }
 
-export function noop(): void {}
-
-export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): ChatOnlyClient {
-  const on: ChatOnlyHandlers = {
-    onWelcome: handlers.onWelcome ?? noop,
-    onPeerJoined: handlers.onPeerJoined ?? noop,
-    onPeerLeft: handlers.onPeerLeft ?? noop,
-    onChat: handlers.onChat ?? noop,
-    onChatDeleted: handlers.onChatDeleted ?? noop,
-    onPing: handlers.onPing ?? noop,
-    onClose: handlers.onClose ?? noop,
-    onError: handlers.onError ?? noop,
-  };
-
+export function createChatClient(on: Partial<ChatOnlyHandlers> = {}): ChatOnlyClient {
   let ws: WebSocket | null = null;
   let stopped = false;
 
-  // Returns whether the frame was actually written — see createSFUClient.send.
-  function send(event: string, data: unknown): boolean {
+  // Returns whether the frame was actually written; a closed socket is a no-op.
+  function send<E extends ClientMessage['event']>(
+    event: E,
+    data: Extract<ClientMessage, { event: E }>['data'],
+  ): boolean {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify({ event, data }));
     return true;
@@ -103,7 +84,7 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
       };
 
       socket.onerror = (event) => {
-        on.onError(event);
+        on.onError?.(event);
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
@@ -112,7 +93,7 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
       };
 
       socket.onclose = () => {
-        if (!stopped) on.onClose();
+        if (!stopped) on.onClose?.();
       };
 
       socket.onmessage = (event) => {
@@ -120,30 +101,28 @@ export function createChatClient(handlers: Partial<ChatOnlyHandlers> = {}): Chat
         if (!msg) return;
         switch (msg.event) {
           case 'welcome':
-            on.onWelcome(msg.data);
+            on.onWelcome?.(msg.data);
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              resolve();
+            }
             break;
           case 'peer-joined':
-            on.onPeerJoined(msg.data);
+            on.onPeerJoined?.(msg.data);
             break;
           case 'peer-left':
-            on.onPeerLeft(msg.data);
+            on.onPeerLeft?.(msg.data);
             break;
           case 'chat':
-            on.onChat(msg.data);
+            on.onChat?.(msg.data);
             break;
           case 'chat-deleted':
-            on.onChatDeleted(msg.data);
+            on.onChatDeleted?.(msg.data);
             break;
           case 'ping':
-            on.onPing(msg.data);
+            on.onPing?.(msg.data);
             break;
-          default:
-            break;
-        }
-        if (msg.event === 'welcome' && !resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve();
         }
       };
     });

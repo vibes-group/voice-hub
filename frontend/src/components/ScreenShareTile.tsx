@@ -8,9 +8,7 @@ type Props = {
 };
 
 export function ScreenShareTile({ publisherId, hasSystemAudio, onClick }: Props) {
-  const display = useStore(
-    (s) => s.participants[publisherId]?.display ?? `user-${publisherId}`,
-  );
+  const display = useStore((s) => s.participants[publisherId]?.display ?? `user-${publisherId}`);
 
   return (
     <button

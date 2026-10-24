@@ -1,15 +1,15 @@
-import type { AppUpdate, DesktopApplyState, DesktopUpdateProgress } from '../hooks/useAppVersion';
+import type { AppUpdate, DesktopApplyState } from '../hooks/useAppVersion';
+import type { UpdateProgressPayload } from '../ipc';
 import { useStore } from '../store/useStore';
 import { setRejoinFlag } from '../utils/storage';
 
 interface Props {
   update: AppUpdate | null;
-  reload: () => void;
   applyDesktopUpdate: () => void;
   desktopApplyState: DesktopApplyState;
 }
 
-function formatProgress(progress: DesktopUpdateProgress | null): string {
+function formatProgress(progress: UpdateProgressPayload | null): string {
   if (!progress) return 'Загрузка обновления…';
   if (progress.total && progress.total > 0) {
     const pct = Math.min(100, Math.floor((progress.downloaded / progress.total) * 100));
@@ -19,12 +19,12 @@ function formatProgress(progress: DesktopUpdateProgress | null): string {
   return `Загрузка обновления… ${mb.toFixed(1)} МБ`;
 }
 
-function progressFraction(progress: DesktopUpdateProgress | null): number | null {
+function progressFraction(progress: UpdateProgressPayload | null): number | null {
   if (!progress || !progress.total || progress.total <= 0) return null;
   return Math.min(1, progress.downloaded / progress.total);
 }
 
-export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyState }: Props) {
+export function UpdateBanner({ update, applyDesktopUpdate, desktopApplyState }: Props) {
   const joinState = useStore((s) => s.joinState);
 
   if (!update) return null;
@@ -63,11 +63,9 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
   }
 
   const onAction = () => {
-    if (joinState === 'joined') {
-      setRejoinFlag();
-    }
+    if (joinState === 'joined') setRejoinFlag();
     if (isDesktop) applyDesktopUpdate();
-    else reload();
+    else window.location.reload();
   };
 
   return (
@@ -78,11 +76,7 @@ export function UpdateBanner({ update, reload, applyDesktopUpdate, desktopApplyS
       <div className="flex items-center justify-between gap-3">
         <span className="font-bold uppercase tracking-[0.12em] text-accent">{message}</span>
         {actionLabel && (
-          <button
-            type="button"
-            onClick={onAction}
-            className="btn btn-primary btn-mini"
-          >
+          <button type="button" onClick={onAction} className="btn btn-primary btn-mini">
             {actionLabel}
           </button>
         )}

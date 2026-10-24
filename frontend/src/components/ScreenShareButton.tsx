@@ -5,6 +5,7 @@ import { useStore } from '../store/useStore';
 import { formatVideoStats, useVideoFps, useVideoStream } from '../screenshare/useVideoFps';
 import { ScreenShareSettings } from './ScreenShareSettings';
 import type { ShareMode } from '../screenshare/params';
+import type { ScreenVideoCodec } from '../sfu/protocol';
 
 interface Props {
   onStart: () => void | Promise<void>;
@@ -99,13 +100,14 @@ function SelfPreview({
   videoCodec,
 }: {
   stream: MediaStream;
-  videoCodec: 'av1' | 'vp9' | null;
+  videoCodec: ScreenVideoCodec | null;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoSize = useVideoStream(videoRef, stream);
   const fps = useVideoFps(videoRef, stream);
 
   const { qualityLabel, fpsLabel } = formatVideoStats(videoSize, fps);
+  const badges = [videoCodec?.toUpperCase(), qualityLabel, fpsLabel].filter(Boolean);
 
   return (
     <div className="relative">
@@ -116,23 +118,13 @@ function SelfPreview({
         muted
         className="w-full aspect-video rounded bg-black object-contain"
       />
-      {(videoCodec || qualityLabel || fpsLabel) && (
+      {badges.length > 0 && (
         <div className="absolute left-2 top-2 flex items-center gap-1">
-          {videoCodec && (
-            <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
-              {videoCodec.toUpperCase()}
+          {badges.map((b) => (
+            <span key={b} className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
+              {b}
             </span>
-          )}
-          {qualityLabel && (
-            <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
-              {qualityLabel}
-            </span>
-          )}
-          {fpsLabel && (
-            <span className="text-xs text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-900/80">
-              {fpsLabel}
-            </span>
-          )}
+          ))}
         </div>
       )}
     </div>

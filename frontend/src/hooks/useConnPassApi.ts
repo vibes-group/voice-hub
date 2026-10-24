@@ -38,7 +38,7 @@ export function useConnPassApi() {
   }, []);
 
   const create = useCallback(
-    async (label: string, ttlSeconds: number): Promise<PlaintextResponse | null> => {
+    async (label: string, ttlSeconds: number): Promise<PlaintextResponse> => {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
         credentials: 'same-origin',
@@ -46,7 +46,9 @@ export function useConnPassApi() {
         body: JSON.stringify({ label: label.trim(), ttl_seconds: ttlSeconds }),
       });
       if (!res.ok) {
-        throw res.status === 409 ? new Error('Достигнут лимит паролей') : new Error('Не удалось создать пароль');
+        throw res.status === 409
+          ? new Error('Достигнут лимит паролей')
+          : new Error('Не удалось создать пароль');
       }
       return (await res.json()) as PlaintextResponse;
     },

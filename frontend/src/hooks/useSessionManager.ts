@@ -1,12 +1,7 @@
-// Session lifecycle hook.
-//
-// Owns: join, leave, reconnect state machine (scheduleReconnect +
-// RECONNECT_DELAYS_MS), Tauri "toggle-mute" event bridge, config loading,
-// auto-rejoin-on-reload, mic track enable/disable, engine switch,
-// display-name sync to SFU.
-//
-// Does NOT own: mute/deafen boolean state (App), output mute/deafen UX (App),
-// status messages for engine switch (App wraps switchEngine in try/catch).
+// Session lifecycle: join/leave/room switch, reconnect, config load,
+// auto-rejoin after reload, mic track and engine swaps, the Tauri
+// "toggle-mute" bridge, and the voice-WS send/receive surface.
+// Mute/deafen state and its UX stay in App.
 
 import { useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../store/useStore';
@@ -60,7 +55,6 @@ type UseSessionManagerReturn = {
   changeScreenShareMode: (mode: ShareMode) => Promise<void>;
   subscribeScreenShare: (publisherId: string) => void;
   unsubscribeScreenShare: (publisherId: string) => void;
-  getRoomId: () => string;
   handleChatReceive: (data: ChatPayload) => void;
   handleChatDelete: (data: ChatDeletedPayload) => void;
   handlePingReceive: (data: PingPayload) => void;
@@ -75,21 +69,13 @@ export function useSessionManager({
 }: UseSessionManagerDeps): UseSessionManagerReturn {
   const getStore = useStore.getState;
 
-  // Imperative refs — internal only, not exposed to callers.
   const micGraphRef = useRef<MicGraph | null>(null);
   const peerIdRef = useRef<string | null>(null);
 
-  // Stable per-install id. Created once on first launch, persisted in
-  // localStorage. Survives reconnects, deploys, and OS restarts; only
-  // clearing browser storage / reinstalling resets it. Sent in every
-  // `hello` so peers can key per-peer UI prefs (e.g. volume) by it.
   const clientIdRef = useRef<string>(loadOrCreateClientId());
-
-  // Reconnect state.
   const userLeavingRef = useRef<boolean>(false);
   const lastDisplayNameRef = useRef<string>('');
 
-  // Config loaded at mount — needed by connectSfu.
   const configRef = useRef<{ iceServers: RTCIceServer[] } | null>(null);
 
   // Forward ref for handleJoin so the auto-rejoin effect can call it after
@@ -108,8 +94,6 @@ export function useSessionManager({
   const connectSfuRef = useRef<(graph: MicGraph, display: string) => Promise<void>>(async () => {
     throw new Error('connectSfu not yet initialised');
   });
-
-  // ---- Action surface helpers (stable, ref-based) ----
 
   const getPeerId = useCallback((): string | null => peerIdRef.current, []);
 
@@ -192,10 +176,8 @@ export function useSessionManager({
     [sfu],
   );
 
-  // Tracks the currently selected room slug. Picker is disabled while joined,
-  // so this only changes between sessions — chat history key won't shift mid-call.
-  // Kept in sync with the store via subscription below so idle lurker chats land
-  // in the right bucket.
+  // Chat-history bucket for incoming messages; follows the selected room so
+  // idle lurker chats land in the right one.
   const roomSlugRef = useRef<string>(useStore.getState().roomSlug);
   useEffect(() => {
     return useStore.subscribe((state, prev) => {
@@ -204,8 +186,6 @@ export function useSessionManager({
       }
     });
   }, []);
-
-  const getRoomId = useCallback(() => roomSlugRef.current, []);
 
   const pingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -258,7 +238,7 @@ export function useSessionManager({
   );
 
   const handlePingReceive = useCallback(({ fromName }: PingPayload): void => {
-    const s = useStore.getState(); // snapshot read, not subscription
+    const s = useStore.getState();
     if (s.muteIncomingPings) return;
     s.setIncomingPing({ fromName, at: Date.now() });
     if (pingClearRef.current !== null) clearTimeout(pingClearRef.current);
@@ -271,8 +251,7 @@ export function useSessionManager({
     void flashAttention({ tray: true, window: s.pingWindowFlashEnabled });
   }, []);
 
-  // ---- Reconnect scheduler ----
-  // Created once; options that need freshness use refs (isLeaving, onAttempt).
+  // Created once; everything it reads that changes goes through refs.
 
   const reconnectSchedulerRef = useRef(
     createReconnectScheduler({
@@ -318,7 +297,6 @@ export function useSessionManager({
               err,
             );
             useScreenShareStore.getState().setMyStatus('idle');
-            // fall through
           }
         }
 
@@ -331,8 +309,6 @@ export function useSessionManager({
     }),
   );
 
-  // ---- SFU connection helper ----
-
   const connectSfu = useCallback(
     async (graph: MicGraph, display: string): Promise<void> => {
       const cfg = configRef.current;
@@ -343,7 +319,6 @@ export function useSessionManager({
           display,
           audio,
           sfu,
-          getStore,
           handleChatReceive,
           handleChatDelete,
           handlePingReceive,
@@ -369,14 +344,12 @@ export function useSessionManager({
         client.sendSetState(s.selfMuted, s.deafened);
       }
     },
-    [audio, sfu, handleChatReceive, handleChatDelete, handlePingReceive, getStore],
+    [audio, sfu, handleChatReceive, handleChatDelete, handlePingReceive],
   );
 
   useEffect(() => {
     connectSfuRef.current = connectSfu;
   }, [connectSfu]);
-
-  // ---- Leave ----
 
   const handleLeave = useCallback(() => {
     userLeavingRef.current = true;
@@ -399,8 +372,6 @@ export function useSessionManager({
     getStore().setStatus('Отключено');
   }, [sfu, audio, getStore]);
 
-  // ---- Join ----
-
   const handleJoin = useCallback(
     async (name: string) => {
       if (getStore().joinState === 'joined') return;
@@ -416,10 +387,7 @@ export function useSessionManager({
       const display = name.trim() || loadOrCreateDisplayName(makeGuestName);
       saveDisplayName(display);
 
-      // Capture the slug at join time — chat history bucket stays stable even
-      // if the user picks a different room between sessions (shouldn't be
-      // possible while joined, but defend anyway).
-      roomSlugRef.current = useStore.getState().roomSlug; // snapshot read, not subscription
+      roomSlugRef.current = useStore.getState().roomSlug;
 
       userLeavingRef.current = false;
       reconnectSchedulerRef.current.reset();
@@ -450,18 +418,14 @@ export function useSessionManager({
         await connectSfu(graph, display);
 
         getStore().setJoinState('joined');
-        if (!denoiserReady) {
-          getStore().setStatus('Подключено. Шумоподавление загружается…', false, true);
-        } else {
+        if (denoiserReady) {
           getStore().setStatus('Подключено', false, true);
-        }
-
-        if (!denoiserReady) {
-          // Capture the graph identity so leave-during-load (or leave+rejoin
-          // before WASM resolves) cannot rebuild on a torn-down / replaced graph.
-          const pendingGraph = graph;
+        } else {
+          getStore().setStatus('Подключено. Шумоподавление загружается…', false, true);
           void preloadEngine(targetEngine).then(async () => {
-            if (micGraphRef.current !== pendingGraph) return;
+            // Leave (or leave + rejoin) while WASM loaded: don't rebuild on a
+            // torn-down or replaced graph.
+            if (micGraphRef.current !== graph) return;
             const s = useStore.getState();
             if (s.joinState !== 'joined') return;
             if (s.engine !== targetEngine) return;
@@ -491,8 +455,6 @@ export function useSessionManager({
     handleJoinRef.current = handleJoin;
   }, [handleJoin]);
 
-  // ---- Config load + auto-rejoin on mount ----
-
   useEffect(() => {
     const shouldRejoin = consumeRejoinFlag();
     loadAppConfig()
@@ -512,10 +474,8 @@ export function useSessionManager({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Tauri global hotkey bridge ----
-  // OS-level rdev listener emits "toggle-mute" when the window is unfocused.
-  // Checks joinState as a session-level gate; delegates to the callback for
-  // the actual mute logic (owned by App).
+  // The OS-level (rdev) listener emits "toggle-mute" while the window is
+  // unfocused; the mute logic itself is App's.
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -568,7 +528,7 @@ export function useSessionManager({
 
   const switchRoom = useCallback(
     async (slug: RoomSlug): Promise<void> => {
-      const s = useStore.getState(); // snapshot read, not subscription
+      const s = useStore.getState();
       if (slug === s.roomSlug) return;
       if (s.joinState === 'joining') return;
       if (s.joinState === 'idle') {
@@ -629,17 +589,13 @@ export function useSessionManager({
 
   const updateScreenShareParams = useCallback(async (): Promise<void> => {
     const client = sfu.getClient();
-    if (!client) return;
-    if (!client.isPublishingScreenShare()) return;
-    await client.updateScreenShareParams();
+    if (client?.isPublishingScreenShare()) await client.updateScreenShareParams();
   }, [sfu]);
 
   const changeScreenShareMode = useCallback(
     async (mode: ShareMode): Promise<void> => {
       const client = sfu.getClient();
-      if (!client) return;
-      if (!client.isPublishingScreenShare()) return;
-      await client.changeScreenShareMode(mode);
+      if (client?.isPublishingScreenShare()) await client.changeScreenShareMode(mode);
     },
     [sfu],
   );
@@ -677,7 +633,6 @@ export function useSessionManager({
     changeScreenShareMode,
     subscribeScreenShare,
     unsubscribeScreenShare,
-    getRoomId,
     handleChatReceive,
     handleChatDelete,
     handlePingReceive,

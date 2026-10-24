@@ -35,28 +35,8 @@ export function SessionCard({
     onJoin(displayName);
   }
 
-  function handleNameChange(e: React.ChangeEvent<HTMLInputElement>) {
-    onDisplayNameChange(e.target.value);
-  }
-
-  const micOn = !selfMuted;
-  const earOn = !deafened;
-
-  let heroLabel: string;
-  let HeroIcon: LucideIcon;
-  if (joined) {
-    heroLabel = 'Отключиться';
-    HeroIcon = WifiOff;
-  } else if (joining) {
-    heroLabel = 'Подключение…';
-    HeroIcon = Wifi;
-  } else {
-    heroLabel = 'Подключиться';
-    HeroIcon = Wifi;
-  }
-
-  const tileOn = 'bg-bg-0 border border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]';
-  const tileOff = 'bg-bg-0 border border-danger text-danger hover:bg-[rgba(248,113,113,0.08)]';
+  const heroLabel = joined ? 'Отключиться' : joining ? 'Подключение…' : 'Подключиться';
+  const HeroIcon = joined ? WifiOff : Wifi;
 
   return (
     <section className="card grid gap-5 p-6">
@@ -74,7 +54,7 @@ export function SessionCard({
             placeholder="ИМЯ"
             autoComplete="off"
             value={displayName}
-            onChange={handleNameChange}
+            onChange={(e) => onDisplayNameChange(e.target.value)}
             className="w-full bg-bg-0 border border-line px-4 py-3
             text-accent text-[20px] leading-[28px] font-bold tracking-[0.2em]
             transition-colors duration-150
@@ -85,38 +65,22 @@ export function SessionCard({
 
         <form id="join-form" onSubmit={handleSubmit} className="grid gap-3">
           <div className="flex gap-2">
-            <button
+            <ToggleTile
               id="self-mute-button"
-              type="button"
-              aria-pressed={selfMuted}
-              aria-label={selfMuted ? 'Включить микрофон' : 'Выключить микрофон'}
-              title={selfMuted ? 'Включить микрофон' : 'Выключить микрофон'}
+              off={selfMuted}
+              Icon={Mic}
+              label="Микро"
+              hint={selfMuted ? 'Включить микрофон' : 'Выключить микрофон'}
               onClick={onToggleSelfMute}
-              className={`flex-1 flex items-center p-4 transition-colors duration-150 ${
-                micOn ? tileOn : tileOff
-              }`}
-            >
-              <Mic size={24} className="shrink-0" />
-              <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-                {micOn ? 'Микро' : 'Выкл'}
-              </span>
-            </button>
-            <button
+            />
+            <ToggleTile
               id="deafen-button"
-              type="button"
-              aria-pressed={deafened}
-              aria-label={deafened ? 'Слушать всех' : 'Заглушить всех'}
-              title={deafened ? 'Слушать всех' : 'Заглушить всех'}
+              off={deafened}
+              Icon={Volume2}
+              label="Звук"
+              hint={deafened ? 'Слушать всех' : 'Заглушить всех'}
               onClick={onToggleDeafen}
-              className={`flex-1 flex items-center p-4 transition-colors duration-150 ${
-                earOn ? tileOn : tileOff
-              }`}
-            >
-              <Volume2 size={24} className="shrink-0" />
-              <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
-                {earOn ? 'Звук' : 'Выкл'}
-              </span>
-            </button>
+            />
           </div>
 
           <button
@@ -131,5 +95,42 @@ export function SessionCard({
         </form>
       </div>
     </section>
+  );
+}
+
+function ToggleTile({
+  id,
+  off,
+  Icon,
+  label,
+  hint,
+  onClick,
+}: {
+  id: string;
+  off: boolean;
+  Icon: LucideIcon;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      id={id}
+      type="button"
+      aria-pressed={off}
+      aria-label={hint}
+      title={hint}
+      onClick={onClick}
+      className={`flex-1 flex items-center p-4 transition-colors duration-150 bg-bg-0 border ${
+        off
+          ? 'border-danger text-danger hover:bg-[rgba(248,113,113,0.08)]'
+          : 'border-accent text-accent hover:bg-[rgba(75,226,119,0.08)]'
+      }`}
+    >
+      <Icon size={24} className="shrink-0" />
+      <span className="flex-1 text-center text-[14px] font-bold uppercase tracking-[0.18em]">
+        {off ? 'Выкл' : label}
+      </span>
+    </button>
   );
 }

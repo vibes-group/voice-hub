@@ -51,14 +51,6 @@ function trimUrl(raw: string): string {
   return s;
 }
 
-function handleLinkClick(href: string) {
-  if (!isTauri()) return;
-  // In Tauri webview default anchor would navigate the app. Route to OS browser.
-  void import('@tauri-apps/plugin-opener')
-    .then((m) => m.openUrl(href))
-    .catch((err) => console.error('openUrl failed', err));
-}
-
 function renderText(text: string): ReactNode {
   const parts: ReactNode[] = [];
   let last = 0;
@@ -76,10 +68,12 @@ function renderText(text: string): ReactNode {
         target="_blank"
         rel="noreferrer noopener"
         onClick={(e) => {
-          if (isTauri()) {
-            e.preventDefault();
-            handleLinkClick(href);
-          }
+          // In Tauri the anchor would navigate the app itself; open the OS browser.
+          if (!isTauri()) return;
+          e.preventDefault();
+          void import('@tauri-apps/plugin-opener')
+            .then((m) => m.openUrl(href))
+            .catch((err) => console.error('openUrl failed', err));
         }}
         className="text-accent underline underline-offset-2 break-all hover:opacity-80"
       >
@@ -180,7 +174,6 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
   const atBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Track whether user has scrolled away from bottom.
   const handleScroll = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
@@ -300,20 +293,16 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
           const uploadId = `${TEMP_UPLOAD_PREFIX}${clientMsgId}:${i}`;
           await putBlob(uploadId, file);
           const kind: AttachmentKind = file.type.startsWith('image/') ? 'image' : 'file';
-          if (kind === 'image') {
-            const meta = await imageMeta(file);
-            return {
-              uploadId,
-              kind,
-              name: file.name,
-              mime: file.type,
-              size: file.size,
-              width: meta?.width,
-              height: meta?.height,
-              blurThumb: meta?.blurThumb,
-            };
-          }
-          return { uploadId, kind, name: file.name, mime: file.type, size: file.size };
+          const att: Attachment = {
+            uploadId,
+            kind,
+            name: file.name,
+            mime: file.type,
+            size: file.size,
+          };
+          if (kind !== 'image') return att;
+          const meta = await imageMeta(file);
+          return { ...att, width: meta?.width, height: meta?.height, blurThumb: meta?.blurThumb };
         }),
       );
 
@@ -365,13 +354,12 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
   );
 
   const handleSend = useCallback(() => {
-    const trimmed = text.trim();
-    if ((!trimmed && files.length === 0) || overLimit || !selfPeerId) return;
+    if (!canSend || !selfPeerId) return;
     setText('');
     setFiles([]);
     setFileError(null);
-    void sendMessage(trimmed, files);
-  }, [text, files, overLimit, selfPeerId, sendMessage]);
+    void sendMessage(text.trim(), files);
+  }, [text, files, canSend, selfPeerId, sendMessage]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -440,7 +428,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
         (prev.senderClientId !== undefined && msg.senderClientId !== undefined
           ? prev.senderClientId === msg.senderClientId
           : prev.from === msg.from);
-      const showName = !(sameSender && prev !== null && msg.ts - prev.ts < 5 * 60_000);
+      const showName = !(sameSender && msg.ts - prev.ts < 5 * 60_000);
       const sameMinute =
         prev !== null && Math.floor(prev.ts / 60_000) === Math.floor(msg.ts / 60_000);
       const showTime = showName || !sameMinute;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Attachment } from '../sfu/protocol';
 import { getBlob, putBlob } from '../utils/blobCache';
 
@@ -16,10 +16,7 @@ async function resolveAttachmentBlob(
   if (cached) return cached;
   const res = await fetch(
     `/api/file/${encodeURIComponent(uploadId)}?room=${encodeURIComponent(roomId)}`,
-    {
-      credentials: 'include',
-      signal,
-    },
+    { credentials: 'include', signal },
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`download failed: ${res.status}`);
@@ -43,13 +40,7 @@ export async function downloadAttachment(att: Attachment, roomId: string): Promi
   URL.revokeObjectURL(url);
 }
 
-export type AttachmentUrlStatus = 'loading' | 'ready' | 'unavailable' | 'error';
-
-export type AttachmentUrlState = {
-  url: string | null;
-  status: AttachmentUrlStatus;
-  reload: () => void;
-};
+type AttachmentUrlStatus = 'loading' | 'ready' | 'unavailable' | 'error';
 
 // Resolves an attachment to an object URL for rendering, owning the URL's
 // lifecycle (revoked on unmount or when the source changes) so callers never
@@ -59,17 +50,17 @@ export function useAttachmentUrl(
   uploadId: string,
   roomId: string,
   enabled = true,
-): AttachmentUrlState {
+): { url: string | null; status: AttachmentUrlStatus; reload: () => void } {
   const [status, setStatus] = useState<AttachmentUrlStatus>('loading');
   const [url, setUrl] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const urlRef = useRef<string | null>(null);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let objectUrl: string | null = null;
     const controller = new AbortController();
     setStatus('loading');
     setUrl(null);
@@ -81,8 +72,7 @@ export function useAttachmentUrl(
           setStatus('unavailable');
           return;
         }
-        const objectUrl = URL.createObjectURL(blob);
-        urlRef.current = objectUrl;
+        objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
         setStatus('ready');
       })
@@ -94,10 +84,7 @@ export function useAttachmentUrl(
     return () => {
       cancelled = true;
       controller.abort();
-      if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current);
-        urlRef.current = null;
-      }
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [uploadId, roomId, attempt, enabled]);
 

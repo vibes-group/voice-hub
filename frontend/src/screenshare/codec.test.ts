@@ -10,8 +10,6 @@ function support(send: ('av1' | 'vp9')[]): ScreenCodecSupport {
   return {
     send: new Set(send),
     receive: new Set(send),
-    av1HardwareLikely: null,
-    vp9HardwareLikely: null,
   };
 }
 
@@ -29,7 +27,7 @@ describe('screen codec policy', () => {
 
   it('falls back to AV1 > VP9 order when the requested codec is unsupported', () => {
     expect(chooseScreenCodec('av1', support(['vp9']))).toBe('vp9');
-    expect(chooseScreenCodec('vp9', support(['av1'])) ).toBe('av1');
+    expect(chooseScreenCodec('vp9', support(['av1']))).toBe('av1');
   });
 
   it('orders AV1 before VP9 while retaining VP9 as negotiation fallback', () => {

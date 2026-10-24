@@ -1,6 +1,5 @@
 // RNNoise — Shiguredo vendor + our processor pre-bundled at build time by
 // scripts/bundle-rnnoise.mjs into a single self-contained worklet file.
-// Loading is just addModule + construct, no init payload.
 
 import { createWorkletDenoiser } from '../worklet-denoiser';
 
@@ -14,11 +13,10 @@ export const rnnoise = createWorkletDenoiser({
   id: 'rnnoise',
   label: 'RNNoise',
   processorName: 'rnnoise-processor',
-  preloadAssets: async () => {
-    // HTTP cache warmup — addModule resolves from cache without a second
-    // round trip when the user actually starts the engine.
+  loadModule: async () => {
+    // Warms the HTTP cache so addModule doesn't wait on the network later.
     const r = await fetch(WORKLET_URL, { cache: 'force-cache' });
     if (!r.ok) throw new Error(`rnnoise worklet fetch ${r.status}`);
-    return { moduleUrl: WORKLET_URL };
+    return WORKLET_URL;
   },
 });

@@ -18,7 +18,6 @@ export function setupParticipantAudio(
 ): RemoteParticipantAudio {
   const audioEl = document.createElement('audio');
   audioEl.autoplay = true;
-  (audioEl as HTMLAudioElement & { playsInline: boolean }).playsInline = true;
   audioEl.muted = true;
   audioEl.srcObject = stream;
   audioEl
@@ -54,21 +53,9 @@ export function setupParticipantAudio(
 }
 
 export function teardownParticipantAudio(audio: RemoteParticipantAudio): void {
-  try {
-    audio.sourceNode?.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    audio.gainNode.disconnect();
-  } catch {
-    /* ignore */
-  }
-  try {
-    audio.analyser.disconnect();
-  } catch {
-    /* ignore */
-  }
+  audio.sourceNode?.disconnect();
+  audio.gainNode.disconnect();
+  audio.analyser.disconnect();
   audio.audioEl.pause();
   audio.audioEl.srcObject = null;
 }
@@ -80,8 +67,6 @@ export function applyParticipantGain(
   localMuted: boolean,
   localVolume: number,
 ): void {
-  const muted = deafened || localMuted;
-  const gain = muted ? 0 : (outputVolume / 100) * (localVolume / 100);
-  const ctx = audio.gainNode.context;
-  audio.gainNode.gain.setTargetAtTime(gain, ctx.currentTime, 0.01);
+  const gain = deafened || localMuted ? 0 : (outputVolume / 100) * (localVolume / 100);
+  audio.gainNode.gain.setTargetAtTime(gain, audio.gainNode.context.currentTime, 0.01);
 }

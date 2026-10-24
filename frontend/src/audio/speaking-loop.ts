@@ -30,8 +30,7 @@ export function createSpeakingLoop(): SpeakingLoop {
     if (document.visibilityState === 'hidden') return;
     const now = performance.now();
     for (const t of targets.values()) {
-      const muted = t.getMuted?.() ?? false;
-      if (muted) {
+      if (t.getMuted?.()) {
         t.speakingHoldUntil = 0;
         if (t.speaking) {
           t.speaking = false;
@@ -51,19 +50,6 @@ export function createSpeakingLoop(): SpeakingLoop {
     }
   };
 
-  const ensureTimer = (): void => {
-    if (timerId === null && targets.size > 0) {
-      timerId = window.setInterval(tick, TICK_MS);
-    }
-  };
-
-  const maybeStopTimer = (): void => {
-    if (targets.size === 0 && timerId !== null) {
-      window.clearInterval(timerId);
-      timerId = null;
-    }
-  };
-
   return {
     register(id, target) {
       const prev = targets.get(id);
@@ -72,14 +58,17 @@ export function createSpeakingLoop(): SpeakingLoop {
         speaking: prev?.speaking ?? false,
         speakingHoldUntil: 0,
       });
-      ensureTimer();
+      timerId ??= window.setInterval(tick, TICK_MS);
     },
     unregister(id) {
       const t = targets.get(id);
       if (!t) return;
       targets.delete(id);
       if (t.speaking) t.onChange(false);
-      maybeStopTimer();
+      if (targets.size === 0 && timerId !== null) {
+        window.clearInterval(timerId);
+        timerId = null;
+      }
     },
   };
 }

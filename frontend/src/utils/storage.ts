@@ -19,7 +19,6 @@ export const KEYS = {
   // Selected speaker deviceId, absent for system default.
   speakerDeviceId: 'voice-hub.speaker-device-id',
   // Persistent mute/deafen state — Discord-style, survives reloads.
-  // outputMuted is derived from deafened (no separate key).
   selfMuted: 'voice-hub.self-muted',
   deafened: 'voice-hub.deafened',
   preDeafenSelfMuted: 'voice-hub.pre-deafen-self-muted',
@@ -54,8 +53,7 @@ export const KEYS = {
 //   1. Drop messages older than CHAT_TTL_MS (rolling window).
 //   2. Cap to CHAT_HISTORY_CAP entries (FIFO eviction on write).
 // Pruning runs on both load and save so stale entries don't linger across
-// sessions where the user just reads without writing. No migration from the
-// former localStorage location — any pre-existing history is simply abandoned.
+// sessions where the user just reads without writing.
 export const CHAT_HISTORY_CAP = 1000;
 const CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -106,7 +104,6 @@ function pruneChatHistory(messages: PersistedChatMessage[]): {
 }
 
 // Frees the IndexedDB bytes of removed messages' attachments (fire-and-forget).
-// Shared by history pruning and explicit message deletion.
 export function deleteDroppedBlobs(dropped: PersistedChatMessage[]): void {
   for (const m of dropped) {
     for (const a of m.attachments ?? []) void deleteBlob(a.uploadId);
@@ -158,15 +155,19 @@ const SCREEN_AUDIO_VOLUME_PREFIX = 'voice-hub.screen-audio-volume.';
 const PEER_LABEL_PREFIX = 'voice-hub.peer-label.';
 export const PEER_LABEL_MAX = 32;
 
-// ---------------------------------------------------------------------------
-// Primitive loaders (key-agnostic, used by typed helpers below)
-// ---------------------------------------------------------------------------
+function loadNumberOrNull(key: string): number | null {
+  const raw = localStorage.getItem(key);
+  if (raw === null || raw === '') return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export function loadNumber(key: string, fallback: number): number {
-  const raw = localStorage.getItem(key);
-  if (raw === null || raw === '') return fallback;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return loadNumberOrNull(key) ?? fallback;
+}
+
+export function saveNumber(key: string, v: number): void {
+  localStorage.setItem(key, String(v));
 }
 
 export function loadBoolean(key: string, fallback: boolean): boolean {
@@ -175,12 +176,8 @@ export function loadBoolean(key: string, fallback: boolean): boolean {
   return raw === 'true';
 }
 
-// ---------------------------------------------------------------------------
-// Typed helpers — one load/save pair per persisted domain value
-// ---------------------------------------------------------------------------
-
-function loadDisplayName(): string {
-  return localStorage.getItem(KEYS.displayName) ?? '';
+export function saveBoolean(key: string, v: boolean): void {
+  localStorage.setItem(key, String(v));
 }
 
 export function saveDisplayName(name: string): void {
@@ -192,7 +189,7 @@ export function saveDisplayName(name: string): void {
 // survives reconnects, server switches, and reloads. The user can rename
 // themselves at any time; rename is just another saveDisplayName.
 export function loadOrCreateDisplayName(generate: () => string): string {
-  const existing = loadDisplayName();
+  const existing = localStorage.getItem(KEYS.displayName);
   if (existing) return existing;
   const fresh = generate();
   saveDisplayName(fresh);
@@ -209,7 +206,7 @@ export function makeGuestName(): string {
 // new identity, which is the same effect as a fresh install — by design.
 export function loadOrCreateClientId(): string {
   const existing = localStorage.getItem(KEYS.clientId);
-  if (existing && existing.length > 0) return existing;
+  if (existing) return existing;
   const fresh = crypto.randomUUID();
   localStorage.setItem(KEYS.clientId, fresh);
   return fresh;
@@ -218,11 +215,7 @@ export function loadOrCreateClientId(): string {
 // Per-peer volume keyed by the peer's stable clientId. Returns null when no
 // preference has been saved so callers can fall back to their own default.
 export function loadPeerVolume(clientId: string): number | null {
-  if (!clientId) return null;
-  const raw = localStorage.getItem(PEER_VOLUME_PREFIX + clientId);
-  if (raw === null || raw === '') return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
+  return clientId ? loadNumberOrNull(PEER_VOLUME_PREFIX + clientId) : null;
 }
 
 export function savePeerVolume(clientId: string, volume: number): void {
@@ -231,11 +224,7 @@ export function savePeerVolume(clientId: string, volume: number): void {
 }
 
 export function loadScreenAudioVolume(clientId: string): number | null {
-  if (!clientId) return null;
-  const raw = localStorage.getItem(SCREEN_AUDIO_VOLUME_PREFIX + clientId);
-  if (raw === null || raw === '') return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : null;
+  return clientId ? loadNumberOrNull(SCREEN_AUDIO_VOLUME_PREFIX + clientId) : null;
 }
 
 export function saveScreenAudioVolume(clientId: string, volume: number): void {
@@ -256,18 +245,6 @@ export function savePeerLabel(clientId: string, label: string): void {
     return;
   }
   localStorage.setItem(PEER_LABEL_PREFIX + clientId, trimmed);
-}
-
-export function saveSendVolume(v: number): void {
-  localStorage.setItem(KEYS.sendVolume, String(v));
-}
-
-export function saveBoolean(key: string, v: boolean): void {
-  localStorage.setItem(key, String(v));
-}
-
-export function saveOutputVolume(v: number): void {
-  localStorage.setItem(KEYS.outputVolume, String(v));
 }
 
 const ENGINE_VALUES: EngineKind[] = ['off', ...ENGINE_IDS];
@@ -295,8 +272,7 @@ export function saveRoomSlug(s: RoomSlug): void {
 
 // Selected microphone deviceId. null = use system default.
 export function loadMicDeviceId(): string | null {
-  const raw = localStorage.getItem(KEYS.micDeviceId);
-  return raw && raw.length > 0 ? raw : null;
+  return localStorage.getItem(KEYS.micDeviceId) || null;
 }
 
 export function saveMicDeviceId(id: string | null): void {
@@ -314,8 +290,7 @@ export function saveSpeakerDeviceId(id: string | null): void {
   else localStorage.removeItem(KEYS.speakerDeviceId);
 }
 
-// Shortcut binding (JSON-serialised InputBinding | null).
-// Returns the raw JSON string or null if not set.
+// Shortcut binding (JSON-serialised InputBinding | null); null = key absent.
 export function loadShortcutRaw(): string | null {
   return localStorage.getItem(KEYS.shortcut);
 }
@@ -335,14 +310,10 @@ export function consumeRejoinFlag(): boolean {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Migration: remove keys written by old code versions (run once on startup)
-// ---------------------------------------------------------------------------
-
+// Drops the per-room chat entries (voice-hub.chat.<roomId>) that older
+// versions kept in localStorage; history now lives in IndexedDB.
 export function clearLegacyStorage(): void {
   try {
-    // Chat history moved to IndexedDB; drop the per-room localStorage entries
-    // (voice-hub.chat.<roomId>) that older versions wrote and nobody reads now.
     const stale: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);

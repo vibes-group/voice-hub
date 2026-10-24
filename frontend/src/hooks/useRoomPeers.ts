@@ -1,31 +1,22 @@
 import { useEffect, useState } from 'react';
 import { isRoomSlug, ROOM_SLUGS, type RoomSlug } from '../rooms';
 
-export type PeerSummary = { id: string; displayName: string; chatOnly: boolean };
+type PeerSummary = { id: string; displayName: string; chatOnly: boolean };
 
 function emptyPeers(): Record<RoomSlug, PeerSummary[]> {
   return { room1: [], room2: [], room3: [] };
 }
 
-function normalizePeer(raw: ValidPeer): PeerSummary {
-  return {
-    id: raw.id,
-    displayName:
-      typeof raw.displayName === 'string' && raw.displayName.trim()
-        ? raw.displayName.trim()
-        : `peer-${raw.id}`,
-    chatOnly: raw.chatOnly === true,
-  };
-}
-
-type RawPeer = { id?: unknown; displayName?: unknown; chatOnly?: unknown };
-type ValidPeer = { id: string; displayName?: unknown; chatOnly?: unknown };
-
-function asValidPeer(p: unknown): ValidPeer | null {
+function parsePeer(p: unknown): PeerSummary | null {
   if (typeof p !== 'object' || p === null) return null;
-  const { id } = p as RawPeer;
+  const { id, displayName, chatOnly } = p as {
+    id?: unknown;
+    displayName?: unknown;
+    chatOnly?: unknown;
+  };
   if (typeof id !== 'string') return null;
-  return p as ValidPeer;
+  const name = typeof displayName === 'string' ? displayName.trim() : '';
+  return { id, displayName: name || `peer-${id}`, chatOnly: chatOnly === true };
 }
 
 function parseSnapshot(data: unknown): Record<RoomSlug, PeerSummary[]> | null {
@@ -38,10 +29,7 @@ function parseSnapshot(data: unknown): Record<RoomSlug, PeerSummary[]> | null {
     if (typeof room !== 'object' || room === null) continue;
     const peers = (room as { peers?: unknown }).peers;
     if (!Array.isArray(peers)) continue;
-    next[slug] = peers.flatMap((p) => {
-      const valid = asValidPeer(p);
-      return valid ? [normalizePeer(valid)] : [];
-    });
+    next[slug] = peers.flatMap((p) => parsePeer(p) ?? []);
   }
   return next;
 }
@@ -50,9 +38,8 @@ function parsePeerJoined(data: unknown): { room: RoomSlug; peer: PeerSummary } |
   if (typeof data !== 'object' || data === null) return null;
   const { room, peer } = data as { room?: unknown; peer?: unknown };
   if (!isRoomSlug(room)) return null;
-  const valid = asValidPeer(peer);
-  if (!valid) return null;
-  return { room, peer: normalizePeer(valid) };
+  const parsed = parsePeer(peer);
+  return parsed && { room, peer: parsed };
 }
 
 function parsePeerLeft(data: unknown): { room: RoomSlug; id: string } | null {
@@ -93,16 +80,18 @@ function openEventSource(
     if (snapshot) setPeers(snapshot);
   });
 
-  es.addEventListener('presence-peer-joined', (e: MessageEvent) => {
+  // peer-updated for an unknown id is an insert, so both events upsert.
+  const upsert = (e: MessageEvent) => {
     const parsed = parsePeerJoined(JSON.parse(e.data));
-    if (parsed) {
-      const { room, peer } = parsed;
-      setPeers((prev) => ({
-        ...prev,
-        [room]: prev[room].filter((p) => p.id !== peer.id).concat(peer),
-      }));
-    }
-  });
+    if (!parsed) return;
+    const { room, peer } = parsed;
+    setPeers((prev) => ({
+      ...prev,
+      [room]: prev[room].filter((p) => p.id !== peer.id).concat(peer),
+    }));
+  };
+  es.addEventListener('presence-peer-joined', upsert);
+  es.addEventListener('presence-peer-updated', upsert);
 
   es.addEventListener('presence-peer-left', (e: MessageEvent) => {
     const parsed = parsePeerLeft(JSON.parse(e.data));
@@ -111,18 +100,6 @@ function openEventSource(
       setPeers((prev) => ({
         ...prev,
         [room]: prev[room].filter((p) => p.id !== id),
-      }));
-    }
-  });
-
-  es.addEventListener('presence-peer-updated', (e: MessageEvent) => {
-    // peer-updated with unknown id is treated as insert (idempotent with joined).
-    const parsed = parsePeerJoined(JSON.parse(e.data));
-    if (parsed) {
-      const { room, peer } = parsed;
-      setPeers((prev) => ({
-        ...prev,
-        [room]: prev[room].filter((p) => p.id !== peer.id).concat(peer),
       }));
     }
   });
@@ -142,26 +119,18 @@ export function useRoomPeers(): Record<RoomSlug, PeerSummary[]> {
   const [peers, setPeers] = useState<Record<RoomSlug, PeerSummary[]>>(emptyPeers);
 
   useEffect(() => {
-    let es: EventSource | null = null;
-
-    const open = () => {
-      if (document.visibilityState === 'visible') {
-        es = openEventSource(setPeers);
-      }
-    };
+    let es: EventSource | null =
+      document.visibilityState === 'visible' ? openEventSource(setPeers) : null;
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         es?.close();
         es = null;
-      } else {
-        if (!es || es.readyState === EventSource.CLOSED) {
-          es = openEventSource(setPeers);
-        }
+      } else if (!es || es.readyState === EventSource.CLOSED) {
+        es = openEventSource(setPeers);
       }
     };
 
-    open();
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
