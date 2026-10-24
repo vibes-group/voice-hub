@@ -4765,7 +4765,6 @@ version = "0.5.2"
 dependencies = [
  "keyring",
  "log",
- "png 0.18.1",
  "rdev",
  "serde",
  "serde_json",

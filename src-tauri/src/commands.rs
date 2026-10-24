@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use tauri::{AppHandle, State};
 
-use crate::listener::{Mode, SharedState};
+use crate::listener::SharedState;
 use crate::shortcut::{self, InputBinding};
 
 #[tauri::command]
@@ -28,7 +28,7 @@ pub fn clear_shortcut(app: AppHandle, state: State<'_, SharedState>) -> Result<(
     shortcut::save(&app, None)?;
     let mut s = state.lock().map_err(|e| format!("lock: {e}"))?;
     s.current = None;
-    s.mode = Mode::Normal;
+    s.capturing = false;
     s.pressed.clear();
     s.last_fire = Some(Instant::now());
     Ok(())
@@ -36,22 +36,20 @@ pub fn clear_shortcut(app: AppHandle, state: State<'_, SharedState>) -> Result<(
 
 #[tauri::command]
 pub fn start_capture(state: State<'_, SharedState>) {
-    match state.lock() {
-        Ok(mut s) => {
-            s.mode = Mode::Capturing;
-            s.pressed.clear();
-        }
-        Err(err) => log::error!("start_capture: state mutex poisoned: {err}"),
-    }
+    set_capturing(&state, true);
 }
 
 #[tauri::command]
 pub fn cancel_capture(state: State<'_, SharedState>) {
+    set_capturing(&state, false);
+}
+
+fn set_capturing(state: &SharedState, capturing: bool) {
     match state.lock() {
         Ok(mut s) => {
-            s.mode = Mode::Normal;
+            s.capturing = capturing;
             s.pressed.clear();
         }
-        Err(err) => log::error!("cancel_capture: state mutex poisoned: {err}"),
+        Err(err) => log::error!("set_capturing({capturing}): state mutex poisoned: {err}"),
     }
 }

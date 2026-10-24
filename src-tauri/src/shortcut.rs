@@ -11,14 +11,6 @@ pub enum InputBinding {
     Mouse { button: String },
 }
 
-impl InputBinding {
-    pub fn default_combo() -> Self {
-        InputBinding::Keyboard {
-            keys: vec!["Ctrl".into(), "Shift".into(), "M".into()],
-        }
-    }
-}
-
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -28,41 +20,36 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("shortcut.json"))
 }
 
-/// Result of attempting to load the persisted binding.
-pub enum LoadResult {
-    /// No config file (or unreadable/unparseable) — treat as first run.
-    Missing,
-    /// File present, user explicitly cleared the binding.
-    Cleared,
-    /// File present, user set this binding.
-    Bound(InputBinding),
+/// The persisted binding. A stored `null` is the user's explicit "no shortcut";
+/// a missing or unreadable file is a first run and gets the default saved.
+pub fn load_or_seed(app: &tauri::AppHandle) -> Option<InputBinding> {
+    if let Some(stored) = load(app) {
+        return stored;
+    }
+    let default = InputBinding::Keyboard {
+        keys: vec!["Ctrl".into(), "Shift".into(), "M".into()],
+    };
+    if let Err(err) = save(app, Some(&default)) {
+        log::warn!("seed default shortcut failed: {err}");
+    }
+    Some(default)
 }
 
-/// Load persisted binding choice. See `LoadResult` for the three states.
-pub fn load(app: &tauri::AppHandle) -> LoadResult {
-    let path = match config_path(app) {
-        Ok(p) => p,
-        Err(err) => {
-            log::warn!("shortcut: resolve config path failed: {err}");
-            return LoadResult::Missing;
-        }
-    };
+fn load(app: &tauri::AppHandle) -> Option<Option<InputBinding>> {
+    let path = config_path(app)
+        .inspect_err(|err| log::warn!("shortcut: resolve config path failed: {err}"))
+        .ok()?;
     let raw = match fs::read(&path) {
         Ok(r) => r,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return LoadResult::Missing,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
         Err(err) => {
             log::warn!("shortcut: read {} failed: {err}", path.display());
-            return LoadResult::Missing;
+            return None;
         }
     };
-    match serde_json::from_slice::<Option<InputBinding>>(&raw) {
-        Ok(Some(b)) => LoadResult::Bound(b),
-        Ok(None) => LoadResult::Cleared,
-        Err(err) => {
-            log::warn!("shortcut: parse {} failed: {err}", path.display());
-            LoadResult::Missing
-        }
-    }
+    serde_json::from_slice(&raw)
+        .inspect_err(|err| log::warn!("shortcut: parse {} failed: {err}", path.display()))
+        .ok()
 }
 
 pub fn save(app: &tauri::AppHandle, binding: Option<&InputBinding>) -> Result<(), String> {
@@ -75,10 +62,7 @@ pub fn save(app: &tauri::AppHandle, binding: Option<&InputBinding>) -> Result<()
 mod tests {
     use super::*;
 
-    /// Verifies that each binding fixture file round-trips through
-    /// `serde_json::from_str` → `serde_json::to_string_pretty` byte-for-byte.
-    /// The fixture files are the authoritative storage contract; this test
-    /// locks down that Rust serde never silently changes the on-disk format.
+    /// The fixtures are the on-disk format contract.
     #[test]
     fn binding_fixtures_roundtrip() {
         let fixtures: &[(&str, &str)] = &[

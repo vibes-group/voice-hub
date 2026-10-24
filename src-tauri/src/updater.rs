@@ -1,7 +1,3 @@
-// Updater state machine.
-//
-// Does NOT own: tray construction — that lives in tray.rs.
-
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,50 +14,38 @@ const FOCUS_THROTTLE: Duration = Duration::from_secs(15 * 60);
 const PROGRESS_EMIT_THROTTLE: Duration = Duration::from_millis(100);
 const SERVER_TIMEOUT: Duration = Duration::from_secs(8);
 
-// IPC payloads for events emitted to the webview. Mirrored on the TS side
-// in frontend/src/types/ipc.ts — keep field names and optionality in sync.
+// Event payloads, mirrored in frontend/src/ipc.ts.
 #[derive(Serialize, Clone)]
-pub struct UpdateAvailablePayload {
-    pub version: String,
+struct UpdateAvailablePayload {
+    version: String,
 }
 
 #[derive(Serialize, Clone)]
-pub struct UpdateProgressPayload {
-    pub downloaded: u64,
-    pub total: Option<u64>,
+struct UpdateProgressPayload {
+    downloaded: u64,
+    total: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
-pub struct UpdateInstallingPayload {}
+struct UpdateInstallingPayload {}
 
 #[derive(Serialize, Clone)]
-pub struct UpdateErrorPayload {
-    pub message: String,
+struct UpdateErrorPayload {
+    message: String,
 }
 
-pub struct UpdaterState {
+#[derive(Default)]
+struct UpdaterState {
     last_checked: Option<Instant>,
     pending: Option<Update>,
     installing: bool,
 }
 
-impl UpdaterState {
-    fn new() -> Self {
-        Self {
-            last_checked: None,
-            pending: None,
-            installing: false,
-        }
-    }
-}
+type SharedUpdater = Arc<Mutex<UpdaterState>>;
 
-pub type SharedUpdater = Arc<Mutex<UpdaterState>>;
-
-pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let state: SharedUpdater = Arc::new(Mutex::new(UpdaterState::new()));
-    app.manage(state.clone());
-
-    tray::init(app)?;
+/// Starts the startup check and the hourly loop. The tray must already exist.
+pub fn init(app: &AppHandle) {
+    app.manage(SharedUpdater::default());
 
     let h = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -75,13 +59,8 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             check(h.clone(), /* force */ false).await;
         }
     });
-
-    Ok(())
 }
 
-/// Snapshot the version of the currently pending update, if any.
-/// Used by the tray to preserve the "Install vX.Y.Z" item across menu rebuilds
-/// triggered by unrelated state changes (e.g. autostart toggle).
 pub fn pending_version(app: &AppHandle) -> Option<String> {
     let state = app.try_state::<SharedUpdater>()?;
     let s = state.lock().ok()?;
@@ -96,26 +75,19 @@ fn server_endpoint(host: &str) -> Result<Url, String> {
     Ok(endpoint)
 }
 
-async fn check_endpoint(
-    app: &AppHandle,
-    endpoint: Url,
-    timeout: Duration,
-) -> Result<Option<Update>, String> {
-    let updater = app
-        .updater_builder()
-        .endpoints(vec![endpoint])
-        .map_err(|e| format!("configure endpoint: {e}"))?
-        .timeout(timeout)
-        .build()
-        .map_err(|e| format!("build updater: {e}"))?;
-    updater.check().await.map_err(|e| format!("check: {e}"))
-}
-
 async fn discover_update(app: &AppHandle) -> Result<Option<Update>, String> {
     let Some(host) = connection::load_host() else {
         return Ok(None);
     };
-    check_endpoint(app, server_endpoint(&host)?, SERVER_TIMEOUT).await
+    app.updater_builder()
+        .endpoints(vec![server_endpoint(&host)?])
+        .map_err(|e| format!("configure endpoint: {e}"))?
+        .timeout(SERVER_TIMEOUT)
+        .build()
+        .map_err(|e| format!("build updater: {e}"))?
+        .check()
+        .await
+        .map_err(|e| format!("check: {e}"))
 }
 
 /// Check for an update; `force` skips the focus throttle.
@@ -172,23 +144,9 @@ pub async fn check(app: AppHandle, force: bool) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Install state machine — AppHandle-free
-//
-// `run_install` owns the download/progress/finish lifecycle. It receives the
-// `Update` value directly (extracted by the caller) and two callbacks for the
-// side effects that differ between production use and tests:
-//   - `on_progress(downloaded, total)` — throttled progress notification
-//   - `on_installing()` — called once, just before the restart
-//
-// This keeps the logic unit-testable without a real AppHandle.
-// ---------------------------------------------------------------------------
-
-async fn run_install<FP, FI>(update: Update, on_progress: FP, on_installing: FI) -> Result<(), String>
-where
-    FP: Fn(u64, Option<u64>) + Send + 'static,
-    FI: Fn() + Send + 'static,
-{
+async fn install(update: Update, app: &AppHandle) -> Result<(), String> {
+    let progress_app = app.clone();
+    let installing_app = app.clone();
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now() - PROGRESS_EMIT_THROTTLE;
 
@@ -196,56 +154,33 @@ where
         .download_and_install(
             move |chunk_len, content_len| {
                 downloaded += chunk_len as u64;
-                let done = content_len.map(|c| downloaded >= c).unwrap_or(false);
-                if done || last_emit.elapsed() >= PROGRESS_EMIT_THROTTLE {
-                    last_emit = Instant::now();
-                    on_progress(downloaded, content_len);
+                let done = content_len.is_some_and(|c| downloaded >= c);
+                if !done && last_emit.elapsed() < PROGRESS_EMIT_THROTTLE {
+                    return;
+                }
+                last_emit = Instant::now();
+                let payload = UpdateProgressPayload {
+                    downloaded,
+                    total: content_len,
+                };
+                if let Err(err) = progress_app.emit("update-progress", payload) {
+                    log::warn!("updater: emit update-progress failed: {err}");
                 }
             },
-            on_installing,
+            move || {
+                if let Err(err) =
+                    installing_app.emit("update-installing", UpdateInstallingPayload {})
+                {
+                    log::warn!("updater: emit update-installing failed: {err}");
+                }
+            },
         )
         .await
         .map_err(|e| format!("install: {e}"))
 }
 
-async fn install_with_events(update: Update, app: &AppHandle) -> Result<(), String> {
-    let app_progress = app.clone();
-    let app_installing = app.clone();
-    run_install(
-        update,
-        move |downloaded, total| {
-            if let Err(err) = app_progress.emit(
-                "update-progress",
-                UpdateProgressPayload { downloaded, total },
-            ) {
-                log::warn!("updater: emit update-progress failed: {err}");
-            }
-        },
-        move || {
-            if let Err(err) =
-                app_installing.emit("update-installing", UpdateInstallingPayload {})
-            {
-                log::warn!("updater: emit update-installing failed: {err}");
-            }
-        },
-    )
-    .await
-}
-
-// ---------------------------------------------------------------------------
-// Tauri command adapter
-//
-// Thin glue between the IPC boundary and the state machine above. Handles:
-//   - guard: reject if already installing or no pending update
-//   - extract the `Update` from shared state (consuming it)
-//   - wire up AppHandle emit callbacks
-//   - on error: reset state, emit error event, re-trigger check for retry
-//   - on success: restart the app
-// ---------------------------------------------------------------------------
-
 #[tauri::command]
 pub async fn apply_update(app: AppHandle) -> Result<(), String> {
-    // Guard + extract pending update in one lock scope.
     let update = {
         let state = app
             .try_state::<SharedUpdater>()
@@ -259,9 +194,7 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
         update
     };
 
-    let result = install_with_events(update, &app).await;
-
-    if let Err(ref err) = result {
+    if let Err(err) = install(update, &app).await {
         log::error!("updater: install failed: {err}");
         if let Some(state) = app.try_state::<SharedUpdater>() {
             match state.lock() {
@@ -269,12 +202,10 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
                 Err(err) => log::error!("updater: state mutex poisoned (install reset): {err}"),
             }
         }
-        if let Err(emit_err) = app.emit(
-            "update-error",
-            UpdateErrorPayload {
-                message: err.clone(),
-            },
-        ) {
+        let payload = UpdateErrorPayload {
+            message: err.clone(),
+        };
+        if let Err(emit_err) = app.emit("update-error", payload) {
             log::warn!("updater: emit update-error failed: {emit_err}");
         }
         // Re-discover the update so tray + banner can offer a retry.
@@ -282,20 +213,15 @@ pub async fn apply_update(app: AppHandle) -> Result<(), String> {
         tauri::async_runtime::spawn(async move {
             check(h, true).await;
         });
-        return result;
+        return Err(err);
     }
 
     app.restart();
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn server_endpoint_uses_selected_origin() {
@@ -305,38 +231,5 @@ mod tests {
             endpoint.as_str(),
             "https://voice.example.com:8443/desktop/latest.json"
         );
-    }
-
-    /// Verify the throttle logic: progress callback fires on the last chunk
-    /// (when downloaded == total) even if the time throttle hasn't elapsed.
-    ///
-    /// This test uses a fake `Update`-less path — we only test the callback
-    /// wiring logic that is now decoupled from AppHandle. A full integration
-    /// test would require a live updater server, which is out of scope here.
-    /// The structural win is that `run_install` is now importable without Tauri.
-    #[test]
-    fn progress_callback_signature_is_apphandle_free() {
-        // If this compiles, the separation is correct: on_progress and
-        // on_installing are plain closures, not AppHandle-coupled.
-        let progress_count = Arc::new(AtomicU64::new(0));
-        let installing_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-        let pc = progress_count.clone();
-        let on_progress = move |_downloaded: u64, _total: Option<u64>| {
-            pc.fetch_add(1, Ordering::SeqCst);
-        };
-
-        let ic = installing_called.clone();
-        let on_installing = move || {
-            ic.store(true, Ordering::SeqCst);
-        };
-
-        // Confirm the closures satisfy the required bounds without AppHandle.
-        fn assert_bounds<FP: Fn(u64, Option<u64>) + Send + 'static, FI: Fn() + Send + 'static>(
-            _: FP,
-            _: FI,
-        ) {
-        }
-        assert_bounds(on_progress, on_installing);
     }
 }

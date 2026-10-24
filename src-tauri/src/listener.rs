@@ -9,22 +9,22 @@ use crate::shortcut::{self, InputBinding};
 
 const COOLDOWN: Duration = Duration::from_millis(80);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Normal,
-    Capturing,
-}
+const MODIFIERS: [(&str, [Key; 2]); 4] = [
+    ("Ctrl", [Key::ControlLeft, Key::ControlRight]),
+    ("Shift", [Key::ShiftLeft, Key::ShiftRight]),
+    ("Alt", [Key::Alt, Key::AltGr]),
+    ("Meta", [Key::MetaLeft, Key::MetaRight]),
+];
 
 pub struct ListenerState {
     pub current: Option<InputBinding>,
-    pub mode: Mode,
+    pub capturing: bool,
     pub pressed: HashSet<Key>,
     pub last_fire: Option<Instant>,
-    // True while the Tauri main window is focused. The webview-level
-    // listener handles keyboard fires under focus (since rdev keyboard
-    // events are suppressed under focus on Windows — tauri#14770), so
-    // we skip keyboard fires here while focused to avoid double-toggle
-    // on macOS/Linux where rdev is not suppressed.
+    // While the main window is focused the webview fires keyboard shortcuts
+    // itself (rdev keyboard events are suppressed under focus on Windows —
+    // tauri#14770), so the listener skips them to avoid a double toggle on
+    // macOS/Linux.
     pub window_focused: bool,
 }
 
@@ -32,7 +32,7 @@ impl ListenerState {
     pub fn new(current: Option<InputBinding>) -> Self {
         Self {
             current,
-            mode: Mode::Normal,
+            capturing: false,
             pressed: HashSet::new(),
             last_fire: None,
             window_focused: false,
@@ -44,14 +44,12 @@ pub type SharedState = Arc<Mutex<ListenerState>>;
 
 pub fn start(app: AppHandle, state: SharedState) {
     std::thread::spawn(move || {
-        let cb_state = state.clone();
-        let cb_app = app.clone();
         let result = rdev::listen(move |event: Event| {
-            let mut s = cb_state.lock().unwrap_or_else(|p| {
+            let mut s = state.lock().unwrap_or_else(|p| {
                 log::error!("listener: state mutex poisoned, recovering stale state");
                 p.into_inner()
             });
-            handle_event(&mut s, &cb_app, &event);
+            handle_event(&mut s, &app, &event);
         });
         if let Err(err) = result {
             log::error!("rdev listen failed: {err:?}");
@@ -62,66 +60,45 @@ pub fn start(app: AppHandle, state: SharedState) {
 fn handle_event(state: &mut ListenerState, app: &AppHandle, event: &Event) {
     match &event.event_type {
         EventType::KeyPress(k) => {
-            let was_modifier = is_modifier(k);
-            // Skip OS auto-repeat: if the key is already in `pressed`, this is
-            // a repeat event from holding the key, not a new press edge. On
-            // platforms that send synthetic KeyRelease between repeats (X11),
-            // the cooldown below catches the residual; press-edge handles
-            // Wayland/Windows/macOS where no synthetic release is delivered.
-            let newly_pressed = state.pressed.insert(*k);
-            if !newly_pressed {
+            // A key already in `pressed` is OS auto-repeat, not a new press.
+            // X11 sends synthetic releases between repeats; the cooldown in
+            // `fire_toggle` catches those.
+            if !state.pressed.insert(*k) {
                 return;
             }
-            // Keyboard capture happens in the webview (Tauri+rdev keyboard
-            // events are suppressed when the window is focused on Windows —
-            // tauri-apps/tauri#14770). The listener only handles fire-time
-            // matching for keyboard.
-            if state.mode == Mode::Normal {
-                let modifier_only = is_modifier_only_binding(state.current.as_ref());
-                let trigger = if modifier_only { was_modifier } else { !was_modifier };
-                if trigger {
-                    try_fire_keyboard(state, app);
-                }
+            // Keyboard capture happens in the webview; here we only match fires.
+            if state.capturing || state.window_focused {
+                return;
+            }
+            // Modifier-only bindings fire on a modifier press, others on the
+            // non-modifier key.
+            if is_modifier(k) == is_modifier_only_binding(state.current.as_ref())
+                && matches_keyboard(state.current.as_ref(), &state.pressed)
+            {
+                fire_toggle(state, app);
             }
         }
         EventType::KeyRelease(k) => {
             state.pressed.remove(k);
         }
-        EventType::ButtonPress(b) => match state.mode {
-            Mode::Normal => {
-                if matches_mouse(state.current.as_ref(), b) {
-                    fire_toggle(state, app);
-                }
+        EventType::ButtonPress(b) => {
+            if state.capturing {
+                capture_mouse(state, app, b);
+            } else if matches_mouse(state.current.as_ref(), b) {
+                fire_toggle(state, app);
             }
-            Mode::Capturing => try_capture_mouse(state, app, b),
-        },
+        }
         _ => {}
     }
 }
 
-// ---- Normal mode ----
-
-fn try_fire_keyboard(state: &mut ListenerState, app: &AppHandle) {
-    // The webview-level listener owns keyboard fires while the window is
-    // focused — see ListenerState::window_focused.
-    if state.window_focused {
-        return;
-    }
-    let Some(binding) = state.current.clone() else {
-        return;
-    };
-    if !matches_keyboard(&binding, &state.pressed) {
-        return;
-    }
-    fire_toggle(state, app);
-}
-
 fn fire_toggle(state: &mut ListenerState, app: &AppHandle) {
     let now = Instant::now();
-    if let Some(prev) = state.last_fire {
-        if now.duration_since(prev) < COOLDOWN {
-            return;
-        }
+    if state
+        .last_fire
+        .is_some_and(|prev| now.duration_since(prev) < COOLDOWN)
+    {
+        return;
     }
     state.last_fire = Some(now);
     if let Err(err) = app.emit("toggle-mute", ()) {
@@ -129,55 +106,52 @@ fn fire_toggle(state: &mut ListenerState, app: &AppHandle) {
     }
 }
 
+fn capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
+    let Some(label) = button_label(btn) else {
+        return;
+    };
+    let binding = InputBinding::Mouse { button: label };
+    if let Err(err) = shortcut::save(app, Some(&binding)) {
+        log::error!("save shortcut: {err}");
+    }
+    state.current = Some(binding.clone());
+    state.pressed.clear();
+    state.capturing = false;
+    state.last_fire = Some(Instant::now()); // suppress retrigger from same press
+    if let Err(err) = app.emit("input-captured", binding) {
+        log::warn!("listener: emit input-captured failed: {err}");
+    }
+}
+
+fn is_modifier(k: &Key) -> bool {
+    MODIFIERS.iter().any(|(_, keys)| keys.contains(k))
+}
+
+fn is_modifier_label(label: &str) -> bool {
+    MODIFIERS.iter().any(|(name, _)| *name == label)
+}
+
 fn is_modifier_only_binding(b: Option<&InputBinding>) -> bool {
     match b {
-        Some(InputBinding::Keyboard { keys }) if !keys.is_empty() => {
-            keys.iter().all(|k| is_modifier_label(k))
+        Some(InputBinding::Keyboard { keys }) => {
+            !keys.is_empty() && keys.iter().all(|k| is_modifier_label(k))
         }
         _ => false,
     }
 }
 
-fn is_modifier_label(label: &str) -> bool {
-    matches!(label, "Ctrl" | "Shift" | "Alt" | "Meta")
-}
-
-fn matches_keyboard(binding: &InputBinding, pressed: &HashSet<Key>) -> bool {
-    let keys = match binding {
-        InputBinding::Keyboard { keys } => keys,
-        _ => return false,
+fn matches_keyboard(binding: Option<&InputBinding>, pressed: &HashSet<Key>) -> bool {
+    let Some(InputBinding::Keyboard { keys }) = binding else {
+        return false;
     };
-
-    let want_ctrl = keys.iter().any(|k| k == "Ctrl");
-    let want_shift = keys.iter().any(|k| k == "Shift");
-    let want_alt = keys.iter().any(|k| k == "Alt");
-    let want_meta = keys.iter().any(|k| k == "Meta");
-
-    if want_ctrl != has_ctrl(pressed) {
-        return false;
-    }
-    if want_shift != has_shift(pressed) {
-        return false;
-    }
-    if want_alt != has_alt(pressed) {
-        return false;
-    }
-    if want_meta != has_meta(pressed) {
-        return false;
-    }
-
-    for label in keys {
-        if is_modifier_label(label) {
-            continue;
-        }
-        let Some(target) = label_to_key(label) else {
-            return false;
-        };
-        if !pressed.contains(&target) {
-            return false;
-        }
-    }
-    true
+    let modifiers_match = MODIFIERS.iter().all(|(name, variants)| {
+        keys.iter().any(|k| k == name) == variants.iter().any(|v| pressed.contains(v))
+    });
+    modifiers_match
+        && keys
+            .iter()
+            .filter(|label| !is_modifier_label(label))
+            .all(|label| label_to_key(label).is_some_and(|k| pressed.contains(&k)))
 }
 
 fn matches_mouse(current: Option<&InputBinding>, btn: &Button) -> bool {
@@ -186,60 +160,6 @@ fn matches_mouse(current: Option<&InputBinding>, btn: &Button) -> bool {
     };
     button_label(btn).as_deref() == Some(button.as_str())
 }
-
-// ---- Capturing mode (mouse only) ----
-
-fn try_capture_mouse(state: &mut ListenerState, app: &AppHandle, btn: &Button) {
-    let Some(label) = button_label(btn) else {
-        return;
-    };
-    let binding = InputBinding::Mouse { button: label };
-    finalize_capture(state, app, binding);
-}
-
-fn finalize_capture(state: &mut ListenerState, app: &AppHandle, binding: InputBinding) {
-    if let Err(err) = shortcut::save(app, Some(&binding)) {
-        log::error!("save shortcut: {err}");
-    }
-    state.current = Some(binding.clone());
-    state.pressed.clear();
-    state.mode = Mode::Normal;
-    state.last_fire = Some(Instant::now()); // suppress retrigger from same press
-    if let Err(err) = app.emit("input-captured", binding) {
-        log::warn!("listener: emit input-captured failed: {err}");
-    }
-}
-
-// ---- Modifier helpers ----
-
-fn is_modifier(k: &Key) -> bool {
-    matches!(
-        k,
-        Key::ControlLeft
-            | Key::ControlRight
-            | Key::ShiftLeft
-            | Key::ShiftRight
-            | Key::Alt
-            | Key::AltGr
-            | Key::MetaLeft
-            | Key::MetaRight
-    )
-}
-
-fn has_ctrl(p: &HashSet<Key>) -> bool {
-    p.contains(&Key::ControlLeft) || p.contains(&Key::ControlRight)
-}
-fn has_shift(p: &HashSet<Key>) -> bool {
-    p.contains(&Key::ShiftLeft) || p.contains(&Key::ShiftRight)
-}
-fn has_alt(p: &HashSet<Key>) -> bool {
-    p.contains(&Key::Alt) || p.contains(&Key::AltGr)
-}
-fn has_meta(p: &HashSet<Key>) -> bool {
-    p.contains(&Key::MetaLeft) || p.contains(&Key::MetaRight)
-}
-
-// ---- Mouse button mapping ----
 
 fn button_label(b: &Button) -> Option<String> {
     match b {
@@ -250,7 +170,7 @@ fn button_label(b: &Button) -> Option<String> {
     }
 }
 
-// ---- Key label mapping (round-trip with frontend labelFromCode) ----
+// Round-trips with the frontend's labelFromCode; keymap.json pins both sides.
 
 fn label_to_key(label: &str) -> Option<Key> {
     Some(match label {
@@ -374,8 +294,6 @@ mod tests {
         labels: Vec<KeymapEntry>,
     }
 
-    const MODIFIERS: &[&str] = &["Ctrl", "Shift", "Alt", "Meta"];
-
     #[test]
     fn keymap_json_coverage() {
         let keymap: Keymap =
@@ -383,7 +301,7 @@ mod tests {
 
         for entry in &keymap.labels {
             let label = &entry.label;
-            if MODIFIERS.contains(&label.as_str()) {
+            if is_modifier_label(label) {
                 continue;
             }
             assert!(

@@ -10,62 +10,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
-use tauri::image::Image;
-
-use crate::tray_flash::TrayFlashState;
 
 use crate::listener::{ListenerState, SharedState};
+use crate::tray_flash::TrayFlashState;
 
 pub struct QuitFlag(pub AtomicBool);
 
-fn decode_png_rgba(bytes: &[u8]) -> Result<Image<'static>, png::DecodingError> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    decoder.set_transformations(
-        png::Transformations::normalize_to_color8() | png::Transformations::ALPHA,
-    );
-    let mut reader = decoder.read_info()?;
-    let buf_size = reader
-        .output_buffer_size()
-        .unwrap_or_else(|| reader.info().raw_bytes());
-    let mut buf = vec![0u8; buf_size];
-    let info = reader.next_frame(&mut buf)?;
-    let raw = &buf[..info.buffer_size()];
-
-    let rgba = match info.color_type {
-        png::ColorType::Rgba => raw.to_vec(),
-        png::ColorType::Rgb => raw
-            .chunks_exact(3)
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect(),
-        png::ColorType::Grayscale => raw
-            .iter()
-            .flat_map(|&g| [g, g, g, 255])
-            .collect(),
-        png::ColorType::GrayscaleAlpha => raw
-            .chunks_exact(2)
-            .flat_map(|c| [c[0], c[0], c[0], c[1]])
-            .collect(),
-        png::ColorType::Indexed => {
-            return Err(png::DecodingError::IoError(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "indexed PNG output was not expanded",
-            )));
-        }
-    };
-
-    Ok(Image::new_owned(rgba, info.width, info.height))
-}
-
 pub fn run() {
-    // Pick the initial URL from the saved host (if any). With no host, load
-    // the local connect.html screen — the user enters their server there.
-    let initial_url = match connection::load_host() {
-        Some(host) => match connection::normalize_host(&host) {
-            Ok(url) => WebviewUrl::External(url),
-            Err(_) => WebviewUrl::App("connect.html".into()),
-        },
-        None => WebviewUrl::App("connect.html".into()),
-    };
+    let initial_url = connection::load_host()
+        .and_then(|host| connection::normalize_host(&host).ok())
+        .map_or_else(
+            || WebviewUrl::App(connection::CONNECT_PATH.into()),
+            WebviewUrl::External,
+        );
 
     tauri::Builder::default()
         .plugin(
@@ -156,33 +113,18 @@ pub fn run() {
 
             let handle = app.handle().clone();
 
-            // First run (no config file) → seed default and persist.
-            // Existing file (even with `null`) → respect user's choice.
-            let initial = match shortcut::load(&handle) {
-                shortcut::LoadResult::Missing => {
-                    let default = shortcut::InputBinding::default_combo();
-                    if let Err(err) = shortcut::save(&handle, Some(&default)) {
-                        log::warn!("seed default shortcut failed: {err}");
-                    }
-                    Some(default)
-                }
-                shortcut::LoadResult::Cleared => None,
-                shortcut::LoadResult::Bound(b) => Some(b),
-            };
-            let state = Arc::new(Mutex::new(ListenerState::new(initial)));
+            let binding = shortcut::load_or_seed(&handle);
+            let state = Arc::new(Mutex::new(ListenerState::new(binding)));
             app.manage(state.clone());
-
             listener::start(handle.clone(), state);
 
-            updater::init(&handle)?;
+            tray::init(&handle)?;
+            updater::init(&handle);
 
-            let base_icon = tray::default_icon(&handle);
-
-            static ALERT_PNG: &[u8] = include_bytes!("../icons/tray-alert.png");
-            let alert_icon = decode_png_rgba(ALERT_PNG)
-                .expect("bundled tray-alert.png failed to decode");
-
-            app.manage(Arc::new(TrayFlashState::new(base_icon, alert_icon)));
+            app.manage(TrayFlashState::new(
+                tray::default_icon(&handle),
+                tauri::include_image!("icons/tray-alert.png"),
+            ));
 
             Ok(())
         })

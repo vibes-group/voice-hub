@@ -1,14 +1,8 @@
-// Tray icon construction and menu event dispatch.
-//
-// Single source of truth for menu items. `build_menu` covers both the idle
-// state (no pending update) and the update-available state — callers pass the
-// optional update version and this function adds the "Install" item when set.
-
 use std::sync::atomic::Ordering;
 
-use tauri::menu::{CheckMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, Runtime, Wry};
+use tauri::{AppHandle, Manager, Wry};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::connection;
@@ -34,12 +28,7 @@ fn autostart_enabled(app: &AppHandle) -> bool {
     }
 }
 
-/// Build the tray menu. When `update_version` is `Some`, an "Install vX.Y.Z"
-/// item appears at the top separated from the rest.
-pub fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Result<Menu<Wry>> {
-    let show = MenuItem::with_id(app, ITEM_SHOW, "Открыть Voice Hub", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, ITEM_CHECK, "Проверить обновления", true, None::<&str>)?;
-    let change = MenuItem::with_id(app, ITEM_CHANGE_SERVER, "Сменить сервер", true, None::<&str>)?;
+fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Result<Menu<Wry>> {
     let autostart = CheckMenuItem::with_id(
         app,
         ITEM_AUTOSTART,
@@ -48,43 +37,32 @@ pub fn build_menu(app: &AppHandle, update_version: Option<&str>) -> tauri::Resul
         autostart_enabled(app),
         None::<&str>,
     )?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-    let sep2 = PredefinedMenuItem::separator(app)?;
-    let sep3 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, ITEM_QUIT, "Выход", true, None::<&str>)?;
 
     let mut builder = MenuBuilder::new(app);
-
     if let Some(version) = update_version {
-        let label = format!("Установить v{version}");
-        let apply = MenuItem::with_id(app, ITEM_UPDATE, &label, true, None::<&str>)?;
-        let sep0 = PredefinedMenuItem::separator(app)?;
-        builder = builder.item(&apply).item(&sep0);
+        builder = builder
+            .text(ITEM_UPDATE, format!("Установить v{version}"))
+            .separator();
     }
-
     builder
-        .item(&show)
-        .item(&check)
-        .item(&sep1)
-        .item(&change)
-        .item(&sep2)
+        .text(ITEM_SHOW, "Открыть Voice Hub")
+        .text(ITEM_CHECK, "Проверить обновления")
+        .separator()
+        .text(ITEM_CHANGE_SERVER, "Сменить сервер")
+        .separator()
         .item(&autostart)
-        .item(&sep3)
-        .item(&quit)
+        .separator()
+        .text(ITEM_QUIT, "Выход")
         .build()
 }
 
-/// The app's default window icon. None only when no icon is configured in
-/// tauri.conf.json. Voice Hub always ships with icons (icons/32x32.png etc.),
-/// so None is unreachable in a correctly-built package.
 pub fn default_icon(app: &AppHandle) -> tauri::image::Image<'static> {
     app.default_window_icon()
         .cloned()
-        .unwrap_or_else(|| unreachable!("tauri.conf.json must declare at least one icon"))
+        .expect("tauri.conf.json declares app icons")
         .to_owned()
 }
 
-/// Construct the tray icon and attach event handlers. Called once at startup.
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, None)?;
     TrayIconBuilder::with_id(TRAY_ID)
@@ -107,7 +85,6 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Replace the tray menu and tooltip to reflect an available update.
 pub fn set_update_available(app: &AppHandle, version: &str) -> tauri::Result<()> {
     let menu = build_menu(app, Some(version))?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
@@ -127,8 +104,7 @@ fn refresh_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Bring the main window to the front: unminimize, show, focus.
-pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
+pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if let Err(err) = window.unminimize() {
             log::warn!("show_main: unminimize failed: {err}");

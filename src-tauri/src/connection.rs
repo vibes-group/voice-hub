@@ -13,21 +13,17 @@ use url::Url;
 const KEYRING_SERVICE: &str = "voice-hub";
 const KEYRING_USER: &str = "host";
 
-const CONNECT_PATH: &str = "connect.html";
+pub const CONNECT_PATH: &str = "connect.html";
 
 fn keyring_entry() -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| format!("keyring init: {e}"))
 }
 
-/// Read the saved host. None if no host stored or keychain unavailable.
+/// None if no host stored or keychain unavailable.
 pub fn load_host() -> Option<String> {
-    let entry = match keyring_entry() {
-        Ok(e) => e,
-        Err(err) => {
-            log::warn!("keyring init failed: {err}");
-            return None;
-        }
-    };
+    let entry = keyring_entry()
+        .inspect_err(|err| log::warn!("{err}"))
+        .ok()?;
     match entry.get_password() {
         Ok(host) if host.is_empty() => None,
         Ok(host) => Some(host),
@@ -61,8 +57,7 @@ pub fn normalize_host(input: &str) -> Result<Url, String> {
     match url.scheme() {
         "https" => Ok(url),
         "http" => {
-            let host = url.host_str().unwrap_or("");
-            if host == "localhost" || host == "127.0.0.1" || host == "[::1]" {
+            if matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")) {
                 Ok(url)
             } else {
                 Err("HTTP разрешён только для localhost. Используйте HTTPS.".into())
@@ -72,17 +67,14 @@ pub fn normalize_host(input: &str) -> Result<Url, String> {
     }
 }
 
-/// Tauri's local content origin pointing at connect.html. Differs by platform;
-/// constructed at runtime so navigate() can return there from a remote page.
+/// Absolute URL of the bundled connect.html, so `navigate` can return there
+/// from a remote page.
 fn connect_url() -> Url {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let base = "tauri://localhost/";
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let base = "http://tauri.localhost/";
-    // Both bases are compile-time-constant valid URL prefixes and CONNECT_PATH
-    // is a plain filename, so parsing cannot fail in practice.
-    Url::parse(&format!("{base}{CONNECT_PATH}"))
-        .unwrap_or_else(|e| unreachable!("connect_url: constant base + path failed to parse: {e}"))
+    Url::parse(&format!("{base}{CONNECT_PATH}")).expect("constant connect URL is valid")
 }
 
 #[derive(Serialize)]
@@ -100,7 +92,6 @@ pub fn get_state() -> ConnectionState {
     }
 }
 
-/// Save host and navigate the main webview to it.
 #[tauri::command]
 pub fn set_host(app: AppHandle, host: String) -> Result<(), String> {
     let url = normalize_host(&host)?;
@@ -197,10 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn trailing_slash_path_stripped() {
-        // normalize_host does not strip the path — it validates scheme and host.
-        // A trailing slash is valid and kept. Verify the result is Ok and the
-        // host is correct.
+    fn trailing_slash_accepted() {
         let url = normalize_host("https://voicehub.example.com/").expect("trailing slash Ok");
         assert_eq!(url.host_str(), Some("voicehub.example.com"));
     }
