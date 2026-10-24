@@ -147,6 +147,105 @@ impl MuxSocket {
         // UDP: a full send buffer means drop, like a congested link.
         let _ = self.socket.try_send_to(data, dst);
     }
+
+    /// Sends and empties `out`: one sendmmsg for the lot, so a timer drive
+    /// that releases a PC's queued packets costs one syscall.
+    fn send_batch(&self, out: &mut Outbox) {
+        let sent = match out.msgs.len() {
+            0 | 1 => 0,
+            _ => self.socket.try_io(tokio::io::Interest::WRITABLE, || sendmmsg(&self.socket, out)).unwrap_or(0),
+        };
+        // Whatever sendmmsg did not take (a single message, an error
+        // mid-batch) goes out one by one.
+        let mut start = if sent == 0 { 0 } else { out.msgs[sent - 1].1 };
+        for &(dst, end) in out.msgs.iter().skip(sent) {
+            self.send(dst, &out.buf[start..end]);
+            start = end;
+        }
+        out.buf.clear();
+        out.msgs.clear();
+    }
+}
+
+/// Datagrams one flush produced, back to back in `buf`.
+#[derive(Default)]
+struct Outbox {
+    buf: Vec<u8>,
+    /// Destination and end offset in `buf` of each datagram.
+    msgs: Vec<(SocketAddr, usize)>,
+}
+
+#[cfg(target_os = "linux")]
+fn sendmmsg(socket: &UdpSocket, out: &Outbox) -> std::io::Result<usize> {
+    use std::os::fd::AsRawFd;
+
+    let n = out.msgs.len();
+    let mut addrs: Vec<libc::sockaddr_storage> = Vec::with_capacity(n);
+    let mut iovs: Vec<libc::iovec> = Vec::with_capacity(n);
+    let mut start = 0;
+    for &(dst, end) in &out.msgs {
+        addrs.push(sockaddr(dst));
+        iovs.push(libc::iovec { iov_base: out.buf[start..end].as_ptr() as *mut libc::c_void, iov_len: end - start });
+        start = end;
+    }
+    let mut hdrs: Vec<libc::mmsghdr> = (0..n)
+        .map(|i| {
+            // SAFETY: all-zero is a valid msghdr (null pointers, zero lengths).
+            let mut h: libc::msghdr = unsafe { std::mem::zeroed() };
+            h.msg_name = (&mut addrs[i] as *mut libc::sockaddr_storage).cast();
+            h.msg_namelen = sockaddr_len(out.msgs[i].0);
+            h.msg_iov = &mut iovs[i];
+            h.msg_iovlen = 1;
+            libc::mmsghdr { msg_hdr: h, msg_len: 0 }
+        })
+        .collect();
+    // SAFETY: every header points into `addrs`, `iovs` and `out.buf`, which
+    // outlive the call; the kernel only reads them.
+    let r = unsafe { libc::sendmmsg(socket.as_raw_fd(), hdrs.as_mut_ptr(), n as libc::c_uint, 0) };
+    if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(r as usize) }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sendmmsg(_: &UdpSocket, _: &Outbox) -> std::io::Result<usize> {
+    Ok(0)
+}
+
+#[cfg(target_os = "linux")]
+fn sockaddr(a: SocketAddr) -> libc::sockaddr_storage {
+    // SAFETY: all-zero is a valid sockaddr_storage.
+    let mut s: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    match a {
+        SocketAddr::V4(a) => {
+            let sin = libc::sockaddr_in {
+                sin_family: libc::AF_INET as libc::sa_family_t,
+                sin_port: a.port().to_be(),
+                sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) },
+                sin_zero: [0; 8],
+            };
+            // SAFETY: sockaddr_in fits in sockaddr_storage.
+            unsafe { std::ptr::write((&mut s as *mut libc::sockaddr_storage).cast(), sin) };
+        }
+        SocketAddr::V6(a) => {
+            let sin6 = libc::sockaddr_in6 {
+                sin6_family: libc::AF_INET6 as libc::sa_family_t,
+                sin6_port: a.port().to_be(),
+                sin6_flowinfo: a.flowinfo(),
+                sin6_addr: libc::in6_addr { s6_addr: a.ip().octets() },
+                sin6_scope_id: a.scope_id(),
+            };
+            // SAFETY: sockaddr_in6 fits in sockaddr_storage.
+            unsafe { std::ptr::write((&mut s as *mut libc::sockaddr_storage).cast(), sin6) };
+        }
+    }
+    s
+}
+
+#[cfg(target_os = "linux")]
+fn sockaddr_len(a: SocketAddr) -> libc::socklen_t {
+    (match a {
+        SocketAddr::V4(_) => size_of::<libc::sockaddr_in>(),
+        SocketAddr::V6(_) => size_of::<libc::sockaddr_in6>(),
+    }) as libc::socklen_t
 }
 
 /// For a STUN binding request, the local ufrag from USERNAME ("local:remote").
@@ -190,6 +289,7 @@ struct RtcState {
     rtc: Rtc,
     events: VecDeque<Event>,
     remotes: Vec<SocketAddr>,
+    out: Outbox,
     /// Since when ICE has not been connected; None while connected.
     unhealthy_since: Option<Instant>,
 }
@@ -203,7 +303,13 @@ impl Pc {
         let now = Instant::now();
         let pc = Arc::new_cyclic(|me| Pc {
             id: NEXT_PC_ID.fetch_add(1, Ordering::Relaxed),
-            rtc: Mutex::new(RtcState { rtc, events: VecDeque::new(), remotes: Vec::new(), unhealthy_since: Some(now) }),
+            rtc: Mutex::new(RtcState {
+                rtc,
+                events: VecDeque::new(),
+                remotes: Vec::new(),
+                out: Outbox::default(),
+                unhealthy_since: Some(now),
+            }),
             dispatch: Mutex::new(()),
             socket: socket.clone(),
             handler,
@@ -237,15 +343,18 @@ impl Pc {
     }
 
     /// Writes into this PC from another PC's event handler: takes only the
-    /// Rtc lock. Events produced here are delivered on this PC's next drive.
+    /// Rtc lock. Output and events come out on this PC's next timer drive,
+    /// shared by every write that lands before it.
     pub fn write(self: &Arc<Self>, f: impl FnOnce(&mut Rtc)) {
         if self.is_closed() {
             return;
         }
-        let mut st = lock(&self.rtc);
+        let st = &mut lock(&self.rtc);
         f(&mut st.rtc);
-        self.flush(&mut st);
-        if !st.events.is_empty() {
+        let now = (self.epoch.elapsed().as_nanos() as u64).max(1);
+        let prev = self.deadline.load(Ordering::Acquire);
+        if prev == 0 || now < prev {
+            self.deadline.store(now, Ordering::Release);
             self.timer.notify_one();
         }
     }
@@ -263,6 +372,11 @@ impl Pc {
 
     /// Polls str0m until it asks for a timeout; sends datagrams and queues events.
     fn flush(&self, st: &mut RtcState) {
+        self.poll(st);
+        self.socket.send_batch(&mut st.out);
+    }
+
+    fn poll(&self, st: &mut RtcState) {
         loop {
             if !st.rtc.is_alive() {
                 return;
@@ -275,7 +389,8 @@ impl Pc {
                         // USERNAME; route it by address.
                         self.socket.routes.write().unwrap().insert(t.destination, self.me.clone());
                     }
-                    self.socket.send(t.destination, &t.contents);
+                    st.out.buf.extend_from_slice(&t.contents);
+                    st.out.msgs.push((t.destination, st.out.buf.len()));
                 }
                 Ok(Output::Timeout(t)) => {
                     let ns = t.saturating_duration_since(self.epoch).as_nanos() as u64;
@@ -400,6 +515,32 @@ impl Drop for Pc {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn send_batch_delivers_each_datagram() {
+        let mux = Mux::bind("127.0.0.1".parse().unwrap(), 0, 0).await.unwrap();
+        let socket = mux.pick();
+        let a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let b = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut out = Outbox::default();
+        for (dst, data) in [(&a, &b"one"[..]), (&b, b"two!"), (&a, b"three")] {
+            out.buf.extend_from_slice(data);
+            out.msgs.push((dst.local_addr().unwrap(), out.buf.len()));
+        }
+        socket.socket.writable().await.unwrap();
+        socket.send_batch(&mut out);
+        assert!(out.buf.is_empty() && out.msgs.is_empty());
+
+        let mut buf = [0u8; 16];
+        let mut recv = async |s: &UdpSocket| {
+            let n = tokio::time::timeout(Duration::from_secs(1), s.recv(&mut buf)).await.unwrap().unwrap();
+            buf[..n].to_vec()
+        };
+        assert_eq!(recv(&a).await, b"one");
+        assert_eq!(recv(&a).await, b"three");
+        assert_eq!(recv(&b).await, b"two!");
+        mux.close();
+    }
 
     #[test]
     fn stun_username_routing() {

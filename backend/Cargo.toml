@@ -35,6 +35,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha1 = "0.11"
 sha2 = "0.11"
+libc = "0.2"
 str0m = { version = "0.24", default-features = false, features = ["aws-lc-rs"] }
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1.54", features = ["rt-multi-thread", "net", "time", "sync", "macros", "signal", "fs", "io-util"] }
