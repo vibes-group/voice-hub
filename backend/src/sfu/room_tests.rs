@@ -1,6 +1,7 @@
 //! Room behaviour over real WebSockets (and real WebRTC via `loadclient`)
 //! against an in-process server.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -367,35 +368,77 @@ async fn screen_share_resume_after_ws_drop() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn churn_recycles_mlines_and_audio_survives() {
+async fn churn_reassigns_slots_without_renegotiation() {
     let (e, port, c) = served().await;
     let t = target(port, c);
     let a = peer(&t, 0, false, 2).await;
     let b = peer(&t, 1, false, 2).await;
-    let speak = |n: u32| {
-        a.send_audio(true, n * 960);
-        b.send_audio(true, n * 960);
-    };
+    until("both joined", || a.joined() && b.joined()).await;
+    let mut ids = HashMap::from([(0, a.id.get().unwrap().clone()), (1, b.id.get().unwrap().clone())]);
     let mut n = 0;
     for round in 0..12u32 {
         let churner = peer(&t, 10 + round, false, 2).await;
         for _ in 0..15 {
-            speak(n);
-            churner.send_audio(true, n * 960);
+            for p in [&a, &b, &churner] {
+                p.send_audio(true, n * 960);
+            }
             n += 1;
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        ids.insert(10 + round, churner.id.get().cloned().unwrap_or_default());
         churner.close();
         until("churner gone", || e.app.rooms["room1"].peers().len() == 2).await;
     }
     let heard = a.stats.audio.lock().unwrap().get(&1).map(|s| s.count).unwrap_or(0);
     for _ in 0..30 {
-        speak(n);
+        b.send_audio(true, n * 960);
         n += 1;
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     until("A still hears B after churn", || a.stats.audio.lock().unwrap().get(&1).is_some_and(|s| s.count > heard + 15)).await;
-    // mic + B + at most one live churner slot: stopped m-lines are recycled.
-    let mlines = a.audio_mlines.load(std::sync::atomic::Ordering::Relaxed);
-    assert!(mlines <= 4, "m-lines grew to {mlines}");
+
+    for p in [&a, &b] {
+        assert_eq!(p.stats.audio_offers.load(std::sync::atomic::Ordering::Relaxed), 1, "joins and leaves never renegotiate");
+        assert_eq!(p.audio_mlines.load(std::sync::atomic::Ordering::Relaxed), 1 + 8, "mic + initial slot pool");
+        let owners = p.stats.slot_owners.lock().unwrap();
+        assert!(!owners.is_empty());
+        for ((owner, publisher), count) in owners.iter() {
+            // A voice's first packet or two can beat its WS announcement.
+            if owner.is_empty() && *count <= 2 {
+                continue;
+            }
+            assert_eq!(owner, &ids[publisher], "{count} packets of publisher {publisher} arrived in a slot announced for {owner:?}");
+        }
+        assert_eq!(p.stats.audio.lock().unwrap().values().map(|s| s.lost()).sum::<u64>(), 0);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn slot_pool_grows_past_initial_size() {
+    let (e, port, c) = served().await;
+    let t = target(port, c);
+    let mut peers = Vec::new();
+    for i in 0..11 {
+        peers.push(peer(&t, i, false, 2).await);
+    }
+    until("all joined", || e.app.rooms["room1"].peers().len() == 11).await;
+    for n in 0..60u32 {
+        for p in &peers {
+            p.send_audio(true, n * 960);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    until("everyone hears the other ten", || {
+        peers.iter().all(|p| p.stats.audio.lock().unwrap().values().filter(|s| s.count > 10).count() == 10)
+    })
+    .await;
+    for p in &peers {
+        assert!(p.stats.audio_offers.load(std::sync::atomic::Ordering::Relaxed) <= 2, "one growth step at most");
+        // The announcement travels over WS, media over UDP: a voice's first
+        // packet or two can beat it, well inside the receiver's jitter buffer.
+        let owners = p.stats.slot_owners.lock().unwrap();
+        assert!(owners.iter().all(|((o, _), c)| !o.is_empty() || *c <= 2), "{owners:?}");
+    }
+    // The first eight joiners grew from 8 to 12 slots once.
+    assert_eq!(peers[0].audio_mlines.load(std::sync::atomic::Ordering::Relaxed), 1 + 12);
 }

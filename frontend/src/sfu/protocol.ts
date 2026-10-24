@@ -104,6 +104,16 @@ export type PeerLeftPayload = {
   id: string;
 };
 
+/**
+ * Incoming audio arrives on "slot" m-lines whose msid stream id is `slot`
+ * (e.g. "slot-0"). This names the peer whose voice a slot now carries; null
+ * means the slot fell silent. Sent before forwarding into a slot starts and
+ * after the previous owner's peer-left.
+ */
+export type AudioSlotsPayload = {
+  slots: { slot: string; peerId: string | null }[];
+};
+
 // peer-joined and peer-info reuse PeerInfo directly (no wrapper).
 
 /** Data field of "peer-state" — broadcast when a peer's mic/deafen state changes. */
@@ -319,6 +329,7 @@ export type ServerMessage =
   | { event: 'welcome'; data: WelcomePayload }
   | { event: 'peer-joined'; data: PeerInfo }
   | { event: 'peer-left'; data: PeerLeftPayload }
+  | { event: 'audio-slots'; data: AudioSlotsPayload }
   | { event: 'peer-info'; data: PeerInfo }
   | { event: 'peer-state'; data: PeerStatePayload }
   | { event: 'chat'; data: ChatPayload }
@@ -473,6 +484,25 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         return null;
       }
       return { event, data: data as PeerLeftPayload };
+    }
+
+    case 'audio-slots': {
+      const slots = (data as Record<string, unknown> | null)?.slots;
+      const valid =
+        Array.isArray(slots) &&
+        slots.every(
+          (s) =>
+            typeof s === 'object' &&
+            s !== null &&
+            typeof (s as Record<string, unknown>).slot === 'string' &&
+            ((s as Record<string, unknown>).peerId === null ||
+              typeof (s as Record<string, unknown>).peerId === 'string'),
+        );
+      if (!valid) {
+        console.warn("[protocol] malformed 'audio-slots' payload:", data);
+        return null;
+      }
+      return { event, data: data as AudioSlotsPayload };
     }
 
     case 'offer': {

@@ -158,6 +158,10 @@ pub struct Stats {
     /// (publisher index) → RTP-sequence accounting, video (per-sub renumbered).
     pub video: Mutex<HashMap<u32, StreamAcc>>,
     pub video_frames: AtomicU64,
+    /// (announced slot owner peer ID or "" if unknown, probe publisher index)
+    /// → packets: shows whether voices land in the slot announced for them.
+    pub slot_owners: Mutex<HashMap<(String, u32), u64>>,
+    pub audio_offers: AtomicU64,
     pub ws_in: AtomicU64,
     pub disconnects: AtomicU64,
     pub errors: AtomicU64,
@@ -186,6 +190,8 @@ struct ClientPc {
     pending: Mutex<Option<SdpPendingOffer>>,
     send_mid: Mutex<Option<Mid>>,
     audio_mid: Mutex<Option<Mid>>,
+    /// SSRC → msid stream ID of the server's audio m-lines.
+    ssrc_streams: Mutex<HashMap<u32, String>>,
     keyframe: AtomicBool,
 }
 
@@ -202,6 +208,7 @@ impl ClientPc {
             pending: Mutex::new(None),
             send_mid: Mutex::new(None),
             audio_mid: Mutex::new(None),
+            ssrc_streams: Mutex::default(),
             keyframe: AtomicBool::new(true),
         });
         let handler: Weak<dyn PcHandler> = Arc::downgrade(&c) as Weak<dyn PcHandler>;
@@ -221,6 +228,18 @@ impl ClientPc {
     /// Accepts a server offer; remembers the m-line we may send on.
     fn answer(&self, sdp: &str) -> Option<String> {
         let offer = SdpOffer::from_sdp_string(sdp).ok()?;
+        if self.role == Role::Audio {
+            let mut map = self.ssrc_streams.lock().unwrap();
+            for section in sdp.split("\nm=").skip(1) {
+                let stream = section.lines().find_map(|l| l.strip_prefix("a=msid:")).and_then(|v| v.split_whitespace().next());
+                let Some(stream) = stream else { continue };
+                for l in section.lines() {
+                    if let Some(ssrc) = l.strip_prefix("a=ssrc:").and_then(|v| v.split_whitespace().next()).and_then(|v| v.parse().ok()) {
+                        map.insert(ssrc, stream.to_string());
+                    }
+                }
+            }
+        }
         let answer = self.pc().with(|rtc| rtc.sdp_api().accept_offer(offer)).ok()?.to_sdp_string();
         if self.role == Role::Audio {
             let mut cur_mid = None;
@@ -276,6 +295,11 @@ impl PcHandler for ClientPc {
                     }
                     peer.stats.samples.lock().unwrap().video_us.push(lat);
                 } else {
+                    if self.role == Role::Audio {
+                        let stream = self.ssrc_streams.lock().unwrap().get(&*pkt.header.ssrc).cloned();
+                        let owner = stream.and_then(|s| peer.slot_owner.lock().unwrap().get(&s).cloned().flatten()).unwrap_or_default();
+                        *peer.stats.slot_owners.lock().unwrap().entry((owner, publisher)).or_default() += 1;
+                    }
                     peer.stats.audio.lock().unwrap().entry(publisher).or_default().add(seq as u64);
                     peer.stats.samples.lock().unwrap().audio_us.push(lat);
                 }
@@ -324,6 +348,8 @@ pub struct ClientPeer {
     hello_at: Mutex<Option<Instant>>,
     got_media: AtomicBool,
     audio_seq: AtomicU32,
+    /// Slot stream ID → announced owner peer ID.
+    pub slot_owner: Mutex<HashMap<String, Option<String>>>,
     /// Resume token from the last screen-share-started.
     pub screen_token: Mutex<Option<String>>,
     /// Reason of the last screen-share-error.
@@ -365,6 +391,7 @@ impl ClientPeer {
             got_media: AtomicBool::new(false),
             audio_seq: AtomicU32::new(0),
             screen_token: Mutex::new(None),
+            slot_owner: Mutex::default(),
             screen_error: Mutex::new(None),
             audio_mlines: AtomicU32::new(0),
         });
@@ -472,6 +499,7 @@ impl ClientPeer {
                 }
             }
             "offer" if pc == "audio" => {
+                self.stats.audio_offers.fetch_add(1, Ordering::Relaxed);
                 let Some(a) = self.audio.get() else { return };
                 let sdp = d["sdp"].as_str().unwrap_or("");
                 self.audio_mlines.store(sdp.matches("\nm=").count() as u32, Ordering::Relaxed);
@@ -535,6 +563,12 @@ impl ClientPeer {
             "screen-share-ended" => {
                 if let Some(s) = self.screen_subs.lock().unwrap().remove(&publisher) {
                     s.close();
+                }
+            }
+            "audio-slots" => {
+                let mut owners = self.slot_owner.lock().unwrap();
+                for s in d["slots"].as_array().into_iter().flatten() {
+                    owners.insert(s["slot"].as_str().unwrap_or("").to_string(), s["peerId"].as_str().map(str::to_string));
                 }
             }
             "screen-share-started" => *self.screen_token.lock().unwrap() = d["sessionToken"].as_str().map(str::to_string),

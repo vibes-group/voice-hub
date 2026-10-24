@@ -189,7 +189,7 @@ impl ScreenSub {
 
     fn forward_audio(&self, pkt: &RtpPacket) {
         let Some(mid) = self.audio_mid else { return };
-        let seq = super::audio::rebase_roc(&self.audio_roc_base, pkt.seq_no);
+        let seq = rebase_roc(&self.audio_roc_base, pkt.seq_no);
         self.pc.write(|rtc| {
             if let Some(tx) = rtc.direct_api().stream_tx_by_mid(mid, None) {
                 tx.write_rtp(
@@ -1047,5 +1047,25 @@ mod tests {
         assert_eq!(s.len(), 3);
         assert_eq!((s[1].kind.as_str(), s[1].mid.as_str(), s[1].pts.as_slice(), s[1].rejected), ("video", "1", &[45u8, 46, 98][..], false));
         assert!(s[2].rejected);
+    }
+}
+
+/// Maps a publisher's extended sequence number onto a subscriber SSRC that
+/// started at rollover zero (as the receiver assumes); `base` is fixed by the
+/// first forwarded packet.
+fn rebase_roc(base: &OnceLock<u64>, seq: SeqNo) -> SeqNo {
+    let base = *base.get_or_init(|| *seq & !0xffff);
+    SeqNo::from(seq.saturating_sub(base))
+}
+
+#[cfg(test)]
+mod roc_tests {
+    use super::*;
+
+    #[test]
+    fn rebase_keeps_wire_seq_and_drops_rollover() {
+        let base = OnceLock::new();
+        assert_eq!(*rebase_roc(&base, SeqNo::from(3 * 65536 + 65535)), 65535);
+        assert_eq!(*rebase_roc(&base, SeqNo::from(4 * 65536 + 2)), 65536 + 2, "rolls over once on the subscriber side");
     }
 }

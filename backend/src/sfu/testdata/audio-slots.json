@@ -1,0 +1,12 @@
+{
+  "slots": [
+    {
+      "slot": "slot-0",
+      "peerId": "11223344aabbccdd"
+    },
+    {
+      "slot": "slot-1",
+      "peerId": null
+    }
+  ]
+}

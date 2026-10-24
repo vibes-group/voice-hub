@@ -12,7 +12,7 @@ use super::{Req, Resp, empty, error, response};
 
 pub type WebSocket = WebSocketStream<TokioIo<Upgraded>>;
 
-/// Generous for SDP: an answer grows with every m-line the session has held.
+/// Generous for SDP: an audio answer grows with the room's slot pool.
 pub const READ_LIMIT: usize = 256 * 1024;
 
 /// Validates the handshake and returns the 101 response plus the pending

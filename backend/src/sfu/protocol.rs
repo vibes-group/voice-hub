@@ -134,6 +134,22 @@ pub struct Hello {
     pub chat_only: bool,
 }
 
+/// `audio-slots` (S→C): who now owns each listed audio slot.
+/// `slot` is the msid stream ID of an audio m-line; `peerId` null means the
+/// slot fell silent. Sent before forwarding into a slot starts, and after
+/// the `peer-left` of its previous owner.
+#[derive(Serialize)]
+pub struct AudioSlots<'a> {
+    pub slots: &'a [AudioSlot<'a>],
+}
+
+#[derive(Serialize)]
+pub struct AudioSlot<'a> {
+    pub slot: &'a str,
+    #[serde(rename = "peerId")]
+    pub peer_id: Option<&'a str>,
+}
+
 #[derive(Deserialize)]
 pub struct SetDisplayName {
     #[serde(rename = "displayName", default)]
@@ -444,6 +460,12 @@ mod tests {
         same("peer-joined-lurker", &lurker);
         same("peer-info", &PeerInfo { display_name: "Bob".into(), ..alice });
         same("peer-left", &PeerLeft { id: "11223344aabbccdd" });
+        same(
+            "audio-slots",
+            &AudioSlots {
+                slots: &[AudioSlot { slot: "slot-0", peer_id: Some("11223344aabbccdd") }, AudioSlot { slot: "slot-1", peer_id: None }],
+            },
+        );
         same("peer-state", &PeerState { id: "11223344aabbccdd", self_muted: true, deafened: false });
         let chat = Chat {
             id: "01JXXXXXXXXXXXXXXXXXXXXXXX",

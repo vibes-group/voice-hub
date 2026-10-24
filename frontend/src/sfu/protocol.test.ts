@@ -104,6 +104,24 @@ describe('peer-joined fixture', () => {
 // Fixture: peer-left.json  →  PeerLeftPayload
 // ---------------------------------------------------------------------------
 
+describe('audio-slots fixture', () => {
+  it('parseServerMessage accepts it, with null for a freed slot', () => {
+    const msg = parseServerMessage(envelope('audio-slots', readFixture('audio-slots.json')));
+    expect(msg).not.toBeNull();
+    expect(msg!.event).toBe('audio-slots');
+    expect(msg!.data).toEqual({
+      slots: [
+        { slot: 'slot-0', peerId: '11223344aabbccdd' },
+        { slot: 'slot-1', peerId: null },
+      ],
+    });
+  });
+
+  it('rejects a slot without a name', () => {
+    expect(parseServerMessage(envelope('audio-slots', { slots: [{ peerId: 'x' }] }))).toBeNull();
+  });
+});
+
 describe('peer-left fixture', () => {
   it('has required PeerLeftPayload shape', () => {
     const data = readFixture('peer-left.json') as PeerLeftPayload;

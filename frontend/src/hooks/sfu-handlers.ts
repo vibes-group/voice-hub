@@ -158,11 +158,15 @@ export function buildSFUHandlers(deps: SFUHandlerDeps): Partial<SFUHandlers> {
     onChatDeleted: handleChatDelete,
     onPing: handlePingReceive,
     onTrack: ({ track, stream, peerId }) => {
-      if (!peerId) return;
       if (track.kind === 'audio') {
         getStore().upsertParticipant({ id: peerId, hasStream: true });
         audio.attachRemoteStream(peerId, stream);
       }
+    },
+    onTrackRemoved: ({ peerId }) => {
+      audio.detachRemoteStream(peerId);
+      if (getStore().participants[peerId])
+        getStore().updateParticipant(peerId, { hasStream: false });
     },
     onScreenShareAvailable: ({ publisherId, hasSystemAudio, videoCodec }) => {
       useScreenShareStore.getState().upsertShare({ publisherId, hasSystemAudio, videoCodec });

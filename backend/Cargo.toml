@@ -53,8 +53,3 @@ strip = true
 # argon2 and SRTP crypto are unbearably slow unoptimised; keep our crate debuggable.
 [profile.dev.package."*"]
 opt-level = 2
-
-# Recycles negotiated stopped m-lines in our own offers (RFC 8829 §5.2.2), so a
-# peer's SDP doesn't grow by one dead m-line per participant who left.
-[patch.crates-io]
-str0m = { git = "https://github.com/vibes-group/str0m", rev = "d01a741bec78aa01d19989d6f97995930653ff40" }

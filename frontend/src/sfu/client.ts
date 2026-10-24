@@ -49,7 +49,10 @@ export type SFUHandlers = {
   onChat: (data: ChatPayload) => void;
   onChatDeleted: (data: ChatDeletedPayload) => void;
   onPing: (data: PingPayload) => void;
-  onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string | null }) => void;
+  /** A peer's voice is now on `stream`. */
+  onTrack: (data: { track: MediaStreamTrack; stream: MediaStream; peerId: string }) => void;
+  /** The stream last given for `peerId` no longer carries its voice. */
+  onTrackRemoved: (data: { peerId: string }) => void;
   onScreenShareAvailable: (data: ScreenShareAvailablePayload) => void;
   onScreenShareEnded: (data: ScreenShareEndedPayload) => void;
   onScreenShareError: (data: ScreenShareErrorPayload) => void;
@@ -118,6 +121,7 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     onChatDeleted: handlers.onChatDeleted ?? noop,
     onPing: handlers.onPing ?? noop,
     onTrack: handlers.onTrack ?? noop,
+    onTrackRemoved: handlers.onTrackRemoved ?? noop,
     onScreenShareAvailable: handlers.onScreenShareAvailable ?? noop,
     onScreenShareEnded: handlers.onScreenShareEnded ?? noop,
     onScreenShareError: handlers.onScreenShareError ?? noop,
@@ -159,15 +163,37 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
     return true;
   }
 
+  // Incoming voices ride on fixed "slot" streams (msid stream id = slot);
+  // audio-slots says whose voice each slot carries. Either can arrive first.
+  const slotOwners = new Map<string, string | null>();
+  const slotMedia = new Map<string, { track: MediaStreamTrack; stream: MediaStream }>();
+
+  function bindSlot(slot: string): void {
+    const peerId = slotOwners.get(slot);
+    const media = slotMedia.get(slot);
+    if (peerId && media) on.onTrack({ ...media, peerId });
+  }
+
+  function assignSlots(slots: { slot: string; peerId: string | null }[]): void {
+    for (const { slot, peerId } of slots) {
+      const prev = slotOwners.get(slot) ?? null;
+      if (prev === peerId) continue;
+      slotOwners.set(slot, peerId);
+      if (prev) on.onTrackRemoved({ peerId: prev });
+      bindSlot(slot);
+    }
+  }
+
   function setupAudioAndWS(opts: ConnectOptions): Promise<void> {
     pc = new RTCPeerConnection({ iceServers });
+    slotOwners.clear();
+    slotMedia.clear();
 
     pc.ontrack = (event) => {
-      const stream = event.streams?.[0] ?? null;
-      const peerId = stream ? stream.id : null;
-      if (stream) {
-        on.onTrack({ track: event.track, stream, peerId });
-      }
+      const stream = event.streams?.[0];
+      if (!stream) return;
+      slotMedia.set(stream.id, { track: event.track, stream });
+      bindSlot(stream.id);
     };
 
     pc.onicecandidate = (event) => {
@@ -313,6 +339,9 @@ export function createSFUClient(handlers: Partial<SFUHandlers> = {}): SFUClient 
       case 'peer-left':
         screenShareCodecs.delete(msg.data.id);
         on.onPeerLeft(msg.data);
+        break;
+      case 'audio-slots':
+        assignSlots(msg.data.slots);
         break;
       case 'peer-info':
         if (msg.data.screenSharing && isScreenVideoCodec(msg.data.screenSharingVideoCodec)) {
