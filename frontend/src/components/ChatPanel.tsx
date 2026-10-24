@@ -257,10 +257,10 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
                 chatUpdateUploadProgress(roomId, clientMsgId, agg);
               },
             });
-            await rekeyBlob(att.uploadId, uploadId);
             return { ...att, uploadId };
           }),
         );
+        await Promise.all(real.map((att, i) => rekeyBlob(attachments[i].uploadId, att.uploadId)));
         chatSetAttachments(roomId, clientMsgId, real);
         chatUpdateUploadProgress(roomId, clientMsgId, 1);
         onSend(text, clientMsgId, real);
@@ -297,7 +297,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             uploadId,
             kind,
             name: file.name,
-            mime: file.type,
+            mime: file.type || 'application/octet-stream',
             size: file.size,
           };
           if (kind !== 'image') return att;
