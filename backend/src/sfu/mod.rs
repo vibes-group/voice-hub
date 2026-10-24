@@ -473,10 +473,8 @@ impl Room {
     fn handle_answer(&self, p: &Arc<Peer>, e: protocol::SdpEnvelope) {
         match e.pc {
             protocol::PcKind::Audio => {
-                if let Some(a) = &p.audio
-                    && a.accept_answer(&e.sdp)
-                {
-                    self.signal_one(a);
+                if let Some(a) = &p.audio {
+                    a.accept_answer(&e.sdp);
                 }
             }
             protocol::PcKind::ScreenSub => self.screen_sub_answer(p, &e.publisher_id, &e.sdp),
@@ -613,22 +611,13 @@ impl Room {
         target.send_event("ping", &protocol::PingServer { from: &p.id, from_name: &from_name });
     }
 
-    /// Renegotiates every audio PC so it sends all current room tracks except
-    /// its own.
+    /// Points every audio PC's slots at the current room tracks (all but its
+    /// own).
     fn signal_all(&self) {
-        let (peers, tracks) = {
-            let st = self.state.lock().unwrap();
-            let peers: Vec<Arc<AudioPeer>> = st.peers.values().filter_map(|e| e.peer.audio.clone()).collect();
-            (peers, st.tracks.clone())
-        };
+        let peers: Vec<Arc<AudioPeer>> = self.state.lock().unwrap().peers.values().filter_map(|e| e.peer.audio.clone()).collect();
         for a in peers {
-            a.sync(&tracks);
+            a.sync();
         }
-    }
-
-    fn signal_one(&self, a: &Arc<AudioPeer>) {
-        let tracks = self.state.lock().unwrap().tracks.clone();
-        a.sync(&tracks);
     }
 
     /// Same as `signal_all`, but safe to call from a PC event handler (which

@@ -490,14 +490,9 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       const slots = (data as Record<string, unknown> | null)?.slots;
       const valid =
         Array.isArray(slots) &&
-        slots.every(
-          (s) =>
-            typeof s === 'object' &&
-            s !== null &&
-            typeof (s as Record<string, unknown>).slot === 'string' &&
-            ((s as Record<string, unknown>).peerId === null ||
-              typeof (s as Record<string, unknown>).peerId === 'string'),
-        );
+        slots.every((s: { slot?: unknown; peerId?: unknown } | null) => {
+          return typeof s?.slot === 'string' && (s.peerId === null || typeof s.peerId === 'string');
+        });
       if (!valid) {
         console.warn("[protocol] malformed 'audio-slots' payload:", data);
         return null;

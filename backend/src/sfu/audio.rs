@@ -4,7 +4,6 @@
 //! slots and announced with `audio-slots`, so joins and leaves don't touch
 //! the SDP; the pool only grows, in steps, when every slot is taken.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::Instant;
 
@@ -146,18 +145,6 @@ struct Slot {
 struct SyncState {
     pending: Option<SdpPendingOffer>,
     slots: Vec<Slot>,
-    /// A sync was skipped mid-negotiation; rerun once the answer lands.
-    resync: bool,
-}
-
-/// Outcome of one reconciliation, applied after the Rtc lock is released:
-/// the forward path takes a track's lock, then a PC's.
-#[derive(Default)]
-struct SyncEffects {
-    unsubscribe: Vec<Arc<AudioTrack>>,
-    subscribe: Vec<(Arc<AudioTrack>, Mid, Arc<SlotStream>)>,
-    /// (slot stream ID, owner peer ID or None when freed).
-    assignments: Vec<(String, Option<String>)>,
 }
 
 pub struct AudioPeer {
@@ -197,27 +184,53 @@ impl AudioPeer {
         }
     }
 
-    /// Assigns the room's tracks (all but our own) to slots; offers more
-    /// slots only when every one is taken.
-    pub fn sync(&self, tracks: &HashMap<String, Arc<AudioTrack>>) {
+    /// Points the slots at the room's current tracks (all but our own).
+    /// While an offer is in flight this waits for the answer, which syncs.
+    pub fn sync(&self) {
+        let mut st = self.sync.lock().unwrap();
+        if st.pending.is_none() {
+            self.reconcile(&mut st);
+        }
+    }
+
+    /// Applies the client's answer, then syncs with the slots it opened.
+    pub fn accept_answer(&self, sdp: &str) {
+        let mut st = self.sync.lock().unwrap();
+        let Some(pending) = st.pending.take() else {
+            log!("sfu: set remote audio ({}): no offer pending", self.peer_id);
+            return;
+        };
+        let accepted = SdpAnswer::from_sdp_string(sdp)
+            .map_err(|e| e.to_string())
+            .and_then(|answer| self.pc.with(|rtc| rtc.sdp_api().accept_answer(pending, answer)).map_err(|e| e.to_string()));
+        match accepted {
+            Ok(()) => st.slots.iter_mut().for_each(|s| s.open = true),
+            Err(e) => {
+                log!("sfu: set remote audio ({}): {e}", self.peer_id);
+                // The offer's m-lines never reached the session.
+                st.slots.retain(|s| s.open);
+            }
+        }
+        self.reconcile(&mut st);
+    }
+
+    /// Frees the slots of departed tracks, puts new tracks into open slots and
+    /// offers more slots when they run out. Runs under the sync lock, so the
+    /// client sees `audio-slots` in the order the pool changed.
+    fn reconcile(&self, st: &mut SyncState) {
+        let Some(room) = self.room.upgrade() else { return };
         if self.pc.is_closed() || self.cancel.is_cancelled() {
             return;
         }
-        let mut guard = self.sync.lock().unwrap();
-        // Offer in flight: str0m (like any JSEP stack) can't start another.
-        if guard.pending.is_some() {
-            guard.resync = true;
-            return;
-        }
-        let st = &mut *guard;
-        let mut fx = SyncEffects::default();
-
+        let tracks = room.state.lock().unwrap().tracks.clone();
         let want: Vec<&Arc<AudioTrack>> = tracks.values().filter(|t| t.owner != self.peer_id).collect();
+        // (slot stream ID, owner peer ID or None when freed).
+        let mut assignments: Vec<(String, Option<String>)> = Vec::new();
         for s in &mut st.slots {
             let Some(t) = &s.track else { continue };
             if !want.iter().any(|w| Arc::ptr_eq(w, t)) {
-                fx.unsubscribe.push(t.clone());
-                fx.assignments.push((s.stream_id.clone(), None));
+                t.remove_sub(&self.pc);
+                assignments.push((s.stream_id.clone(), None));
                 s.track = None;
             }
         }
@@ -225,103 +238,52 @@ impl AudioPeer {
             want.into_iter().filter(|t| !st.slots.iter().any(|s| s.track.as_ref().is_some_and(|a| Arc::ptr_eq(a, t)))).collect();
         new.sort_by(|a, b| a.key.cmp(&b.key));
 
-        let free = st.slots.iter().filter(|s| s.track.is_none()).count();
-        let grow = if st.slots.is_empty() {
-            INITIAL_SLOTS.max(new.len())
-        } else if new.len() > free {
-            (new.len() - free).div_ceil(SLOT_GROWTH) * SLOT_GROWTH
-        } else {
-            0
-        };
-        let offer = (grow > 0)
-            .then(|| {
-                let first_offer = st.slots.is_empty();
-                self.pc.with(|rtc| {
-                    let mut api = rtc.sdp_api();
-                    if first_offer {
-                        api.add_media(MediaKind::Audio, Direction::RecvOnly, None, None, None);
-                    }
-                    for _ in 0..grow {
-                        let stream_id = format!("slot-{}", st.slots.len());
-                        let mid = api.add_media(
-                            MediaKind::Audio,
-                            Direction::SendOnly,
-                            Some(stream_id.clone()),
-                            Some(format!("{stream_id}-audio")),
-                            None,
-                        );
-                        st.slots.push(Slot { mid, stream_id, track: None, open: false, out: Arc::default() });
-                    }
-                    api.apply()
-                })
-            })
-            .flatten();
-
-        // Open slots first: they can carry audio right away.
-        for t in new {
-            let Some(s) = st.slots.iter_mut().filter(|s| s.track.is_none()).min_by_key(|s| !s.open) else { break };
+        let mut new = new.into_iter();
+        let mut subscribe = Vec::new();
+        for s in st.slots.iter_mut().filter(|s| s.track.is_none()) {
+            let Some(t) = new.next() else { break };
             s.track = Some(t.clone());
-            if s.open {
-                fx.assignments.push((s.stream_id.clone(), Some(t.owner.clone())));
-                fx.subscribe.push((t.clone(), s.mid, s.out.clone()));
-            }
+            assignments.push((s.stream_id.clone(), Some(t.owner.clone())));
+            subscribe.push((t.clone(), s.mid, s.out.clone()));
         }
-        if let Some((offer, pending)) = offer {
-            st.pending = Some(pending);
-            self.send(
-                "offer",
-                &SdpEnvelope { pc: PcKind::Audio, publisher_id: String::new(), kind: "offer".into(), sdp: offer.to_sdp_string() },
-            );
-        }
-        drop(guard);
-        self.apply(fx);
-    }
-
-    /// Applies the client's answer. Returns whether a skipped sync is due.
-    pub fn accept_answer(&self, sdp: &str) -> bool {
-        let mut st = self.sync.lock().unwrap();
-        let Some(pending) = st.pending.take() else {
-            log!("sfu: set remote audio ({}): no offer pending", self.peer_id);
-            return false;
-        };
-        let answer = match SdpAnswer::from_sdp_string(sdp) {
-            Ok(a) => a,
-            Err(e) => {
-                log!("sfu: set remote audio ({}): {e}", self.peer_id);
-                return std::mem::take(&mut st.resync);
-            }
-        };
-        if let Err(e) = self.pc.with(|rtc| rtc.sdp_api().accept_answer(pending, answer)) {
-            log!("sfu: set remote audio ({}): {e}", self.peer_id);
-            return std::mem::take(&mut st.resync);
-        }
-        let mut fx = SyncEffects::default();
-        for s in st.slots.iter_mut().filter(|s| !s.open) {
-            s.open = true;
-            if let Some(t) = &s.track {
-                fx.assignments.push((s.stream_id.clone(), Some(t.owner.clone())));
-                fx.subscribe.push((t.clone(), s.mid, s.out.clone()));
-            }
-        }
-        let resync = std::mem::take(&mut st.resync);
-        drop(st);
-        self.apply(fx);
-        resync
-    }
-
-    /// Owner announcements go out before forwarding starts, so the client
-    /// knows whose voice a slot carries by the time it arrives.
-    fn apply(&self, fx: SyncEffects) {
-        for t in fx.unsubscribe {
-            t.remove_sub(&self.pc);
-        }
-        if !fx.assignments.is_empty() {
-            let slots: Vec<AudioSlot> = fx.assignments.iter().map(|(slot, peer)| AudioSlot { slot, peer_id: peer.as_deref() }).collect();
+        // Owner announcements go out before forwarding starts, so the client
+        // knows whose voice a slot carries by the time it arrives.
+        if !assignments.is_empty() {
+            let slots: Vec<AudioSlot> = assignments.iter().map(|(slot, peer)| AudioSlot { slot, peer_id: peer.as_deref() }).collect();
             self.send("audio-slots", &AudioSlots { slots: &slots });
         }
-        for (t, mid, out) in fx.subscribe {
+        for (t, mid, out) in subscribe {
             t.add_sub(&self.pc, mid, &out);
         }
+
+        let waiting = new.len();
+        let grow = if st.slots.is_empty() { INITIAL_SLOTS.max(waiting) } else { waiting.div_ceil(SLOT_GROWTH) * SLOT_GROWTH };
+        if grow == 0 {
+            return;
+        }
+        let first_offer = st.slots.is_empty();
+        let offer = self.pc.with(|rtc| {
+            let mut api = rtc.sdp_api();
+            if first_offer {
+                api.add_media(MediaKind::Audio, Direction::RecvOnly, None, None, None);
+            }
+            for _ in 0..grow {
+                let stream_id = format!("slot-{}", st.slots.len());
+                let mid =
+                    api.add_media(MediaKind::Audio, Direction::SendOnly, Some(stream_id.clone()), Some(format!("{stream_id}-audio")), None);
+                st.slots.push(Slot { mid, stream_id, track: None, open: false, out: Arc::default() });
+            }
+            api.apply()
+        });
+        let Some((offer, pending)) = offer else {
+            st.slots.retain(|s| s.open);
+            return;
+        };
+        st.pending = Some(pending);
+        self.send(
+            "offer",
+            &SdpEnvelope { pc: PcKind::Audio, publisher_id: String::new(), kind: "offer".into(), sdp: offer.to_sdp_string() },
+        );
     }
 
     fn send<T: serde::Serialize>(&self, event: &str, data: &T) {

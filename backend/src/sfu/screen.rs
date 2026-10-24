@@ -959,6 +959,14 @@ pub fn eval_auto_downgrade(sub: &LayerCtl, now: SystemTime, sub_id: &str, pub_id
     false
 }
 
+/// Maps a publisher's extended sequence number onto a subscriber SSRC that
+/// started at rollover zero (as the receiver assumes); `base` is fixed by the
+/// first forwarded packet.
+fn rebase_roc(base: &OnceLock<u64>, seq: SeqNo) -> SeqNo {
+    let base = *base.get_or_init(|| *seq & !0xffff);
+    SeqNo::from(seq.saturating_sub(base))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1048,19 +1056,6 @@ mod tests {
         assert_eq!((s[1].kind.as_str(), s[1].mid.as_str(), s[1].pts.as_slice(), s[1].rejected), ("video", "1", &[45u8, 46, 98][..], false));
         assert!(s[2].rejected);
     }
-}
-
-/// Maps a publisher's extended sequence number onto a subscriber SSRC that
-/// started at rollover zero (as the receiver assumes); `base` is fixed by the
-/// first forwarded packet.
-fn rebase_roc(base: &OnceLock<u64>, seq: SeqNo) -> SeqNo {
-    let base = *base.get_or_init(|| *seq & !0xffff);
-    SeqNo::from(seq.saturating_sub(base))
-}
-
-#[cfg(test)]
-mod roc_tests {
-    use super::*;
 
     #[test]
     fn rebase_keeps_wire_seq_and_drops_rollover() {
