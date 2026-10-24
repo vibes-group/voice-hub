@@ -1,10 +1,10 @@
 // Voice Hub — Vite multi-page config
 //
-// Build output: ./dist (Vite default). Consumed by Go backend (via APP_WEB_DIR
+// Build output: ./dist (Vite default). Consumed by the backend (via APP_WEB_DIR
 // env / config default) and by Tauri (frontendDist in tauri.conf.json).
 //
 // Auth whitelist approach:
-//   Vite emits hashed assets under /assets/*.js|css. Go's requireAuthHTML
+//   Vite emits hashed assets under /assets/*.js|css. The backend's auth gate
 //   passes through any request whose path starts with "/assets/" or
 //   "/vendor/" — both are pure static files with no sensitive content.
 //   That covers all Vite-generated bundles (including the login page's

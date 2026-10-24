@@ -1,8 +1,8 @@
 // Golden-fixture tests for frontend/src/sfu/protocol.ts.
 //
-// Fixtures live in backend/internal/sfu/protocol/testdata/*.json.
-// Go writes them; TS reads them. A Go field rename changes a fixture,
-// which causes these tests to fail at CI — that is the intended behaviour.
+// Fixtures live in backend/src/sfu/testdata/*.json.
+// The backend tests pin its serialization to them; TS reads them. A backend
+// field rename changes a fixture, which fails these tests at CI — intended.
 
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -22,7 +22,7 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const FIXTURE_DIR = resolve(__dirname, '../../../backend/internal/sfu/protocol/testdata');
+const FIXTURE_DIR = resolve(__dirname, '../../../backend/src/sfu/testdata');
 
 function readFixture(name: string): unknown {
   const raw = readFileSync(resolve(FIXTURE_DIR, name), 'utf-8');

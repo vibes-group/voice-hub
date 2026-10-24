@@ -1,0 +1,60 @@
+[package]
+name = "voice-hub"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+default-run = "voice-hub-app"
+
+[[bin]]
+name = "voice-hub-app"
+path = "src/main.rs"
+
+[[bin]]
+name = "hashpass"
+path = "src/bin/hashpass.rs"
+
+[[bin]]
+name = "loadtest"
+path = "src/bin/loadtest/main.rs"
+
+[dependencies]
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+base64ct = { version = "1.8", features = ["alloc"] }
+bytes = "1.12"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.4"
+hmac = "0.13"
+http = "1.5"
+http-body = "1"
+http-body-util = "0.1"
+hyper = { version = "1.12", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
+multer = "3.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha1 = "0.11"
+sha2 = "0.11"
+str0m = { version = "0.24", default-features = false, features = ["aws-lc-rs"] }
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+tokio = { version = "1.54", features = ["rt-multi-thread", "net", "time", "sync", "macros", "signal", "fs", "io-util"] }
+tokio-util = "0.7"
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+tower-http = { version = "0.7", default-features = false, features = ["fs"] }
+turn = "0.17"
+webrtc-util = { version = "0.17", default-features = false, features = ["conn", "vnet"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+# argon2 and SRTP crypto are unbearably slow unoptimised; keep our crate debuggable.
+[profile.dev.package."*"]
+opt-level = 2
+
+# Recycles negotiated stopped m-lines in our own offers (RFC 8829 §5.2.2), so a
+# peer's SDP doesn't grow by one dead m-line per participant who left.
+[patch.crates-io]
+str0m = { git = "https://github.com/vibes-group/str0m", rev = "d01a741bec78aa01d19989d6f97995930653ff40" }

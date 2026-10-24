@@ -8,21 +8,20 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN --mount=type=cache,target=/root/.npm npm run build
 
-FROM golang:1.27-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS build
+FROM rust:1.99-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc AS build
 
 WORKDIR /src
 
-COPY backend/go.mod backend/go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
+COPY backend/Cargo.toml backend/Cargo.lock backend/rust-toolchain.toml ./
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo fetch --locked
 
 COPY backend ./
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux \
-    go build -ldflags="-s -w" -o /out/voice-hub-app ./cmd/server
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --locked --bin voice-hub-app \
+ && cp target/release/voice-hub-app /out-voice-hub-app
 
 FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
@@ -34,7 +33,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=build /out/voice-hub-app /app/voice-hub-app
+COPY --from=build /out-voice-hub-app /app/voice-hub-app
 COPY --from=frontend /src/frontend/dist /app/web
 
 # Persistent state (connection-password hash). Mounted as a volume in compose.

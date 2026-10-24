@@ -1,5 +1,5 @@
 import { buildScreenParams, type ScreenCodecPref } from './params';
-// ScreenVideoCodec lives in the protocol mirror (Go is the source of truth).
+// ScreenVideoCodec lives in the protocol mirror (the backend is the source of truth).
 import type { ScreenVideoCodec } from '../sfu/protocol';
 
 type Codec = RTCRtpCodec & { mimeType: string };

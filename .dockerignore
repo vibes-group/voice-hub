@@ -16,6 +16,7 @@ tmp
 src-tauri
 backend/tmp
 backend/data
+backend/target
 docs
 *.md
 .env*

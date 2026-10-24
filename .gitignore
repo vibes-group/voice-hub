@@ -15,3 +15,5 @@ src-tauri/target/
 src-tauri/gen/schemas/
 scratch
 docker-compose.override.yml
+backend/target/
+!backend/src/bin/

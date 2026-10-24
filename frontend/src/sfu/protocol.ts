@@ -1,6 +1,6 @@
-// Signaling protocol types — TS mirror of backend/internal/sfu/protocol/messages.go.
-// Go is the source of truth. Field renames in Go break the golden-JSON fixtures
-// (backend/internal/sfu/protocol/testdata/*.json), which the Vitest suite reads.
+// Signaling protocol types — TS mirror of backend/src/sfu/protocol.rs.
+// The backend is the source of truth. Field renames there break the golden-JSON
+// fixtures (backend/src/sfu/testdata/*.json), which the Vitest suite reads.
 //
 // Wire format: { "event": "<name>", "data": <payload> }
 //
@@ -154,12 +154,12 @@ export type SetStatePayload = {
 
 /**
  * Maximum UTF-8 byte length the server accepts for a chat message.
- * Mirror of protocol.ChatMaxBytes in messages.go.
+ * Mirror of protocol::CHAT_MAX_BYTES in protocol.rs.
  * Validate with: new TextEncoder().encode(text).length <= CHAT_MAX_BYTES
  */
 export const CHAT_MAX_BYTES = 2000;
 
-/** Max attachments per chat message; mirrors protocol.ChatMaxAttachments. */
+/** Max attachments per chat message; mirrors protocol::CHAT_MAX_ATTACHMENTS. */
 export const CHAT_MAX_ATTACHMENTS = 10;
 
 /** Renders as an inline image preview ('image') or a download card ('file'). */
@@ -168,7 +168,7 @@ export type AttachmentKind = 'image' | 'file';
 /**
  * Lightweight metadata for one chat attachment. The bytes travel over HTTP
  * (upload/download endpoints, keyed by uploadId), never over the WS. Mirrors
- * protocol.Attachment in the Go backend.
+ * protocol::Attachment in the backend.
  *
  * width/height/blurThumb are image-only hints: dimensions reserve layout space
  * without a reflow, blurThumb is a tiny base64 JPEG data URL placeholder shown
@@ -247,7 +247,7 @@ export type ChatDeletedPayload = {
   id: string;
 };
 
-// Screen share — mirror of protocol/messages.go Screen* types.
+// Screen share — mirror of protocol.rs Screen* types.
 // See backend file for the lifecycle / state-machine notes; this file only
 // names the wire shapes.
 
