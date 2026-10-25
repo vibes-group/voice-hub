@@ -14,6 +14,9 @@
 //!            audio watched by everyone (one viewer capped to T1)
 //!   churn    16 steady voice peers + 4 peers reconnecting (same clientId)
 //!   scale:N  N voice peers in one room, all speaking (worst-case fan-out)
+//!   rooms:N[:S[:M]]  3 rooms × N voice peers; S speakers per room at a time
+//!            (default 1, rotating every 4 s) among the unmuted, the rest send
+//!            DTX; M peers per room are self-muted (DTX too, like a muted mic)
 //!   smoke    4 peers speaking; exits non-zero when nothing flows
 
 use std::io::Read;
@@ -34,11 +37,12 @@ struct Args {
     label: String,
     out: Option<String>,
     local_ip: std::net::IpAddr,
+    warmup: Duration,
 }
 
 fn usage() -> ! {
     eprintln!(
-        "usage: loadtest run --target URL (--password P | --password-stdin) --scenario NAME [--duration SECS] [--server-pid PID] [--label L] [--out FILE]\n       loadtest report A.json B.json [...]"
+        "usage: loadtest run --target URL (--password P | --password-stdin) --scenario NAME [--duration SECS] [--server-pid PID] [--label L] [--out FILE] [--warmup SECS]\n       loadtest report A.json B.json [...]"
     );
     std::process::exit(2);
 }
@@ -53,6 +57,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Args {
         label: "server".into(),
         out: None,
         local_ip: "127.0.0.1".parse().unwrap(),
+        warmup: Duration::ZERO,
     };
     while let Some(flag) = it.next() {
         let mut val = || it.next().unwrap_or_else(|| usage());
@@ -70,6 +75,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Args {
             "--label" => a.label = val(),
             "--out" => a.out = Some(val()),
             "--local-ip" => a.local_ip = val().parse().unwrap_or_else(|_| usage()),
+            "--warmup" => a.warmup = Duration::from_secs(val().parse().unwrap_or_else(|_| usage())),
             _ => usage(),
         }
     }
@@ -263,7 +269,8 @@ impl Run {
 }
 
 /// Drives 20 ms audio ticks: `speaking(peer, tick)` → Some(true) full frame,
-/// Some(false) DTX (one packet per 400 ms), None muted.
+/// Some(false) DTX (one packet per 400 ms, phase spread across peers like
+/// real clients), None muted.
 fn audio_driver(run: Arc<Run>, speaking: impl Fn(&ClientPeer, u64) -> Option<bool> + Send + 'static) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(20));
@@ -279,7 +286,7 @@ fn audio_driver(run: Arc<Run>, speaking: impl Fn(&ClientPeer, u64) -> Option<boo
             for p in &peers {
                 match speaking(p, n) {
                     Some(true) => p.send_audio(true, (n * 960) as u32),
-                    Some(false) if n.is_multiple_of(20) => p.send_audio(false, (n * 960) as u32),
+                    Some(false) if (n + u64::from(p.idx)).is_multiple_of(20) => p.send_audio(false, (n * 960) as u32),
                     _ => {}
                 }
             }
@@ -417,6 +424,30 @@ async fn scale(run: Arc<Run>, n: u32) {
     audio_driver(run.clone(), |_, _| Some(true));
 }
 
+async fn rooms(run: Arc<Run>, n: u32, speakers: u32, muted: u32) {
+    run.watch_presence(2);
+    // The last `muted` peers of each room are self-muted.
+    let live = n - muted;
+    for room in 0..3 {
+        for i in 0..n {
+            if let Some(p) = run.join(room * n + i, &format!("room{}", room + 1), false, false, 2, None).await
+                && i >= live
+            {
+                p.set_state(true);
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    }
+    audio_driver(run.clone(), move |p, t| {
+        let local = (p.idx % n) as u64;
+        if local >= u64::from(live) {
+            return Some(false);
+        }
+        let first = (t / 200) % u64::from(live);
+        Some((local + u64::from(live) - first) % u64::from(live) < u64::from(speakers))
+    });
+}
+
 #[tokio::main]
 async fn main() {
     let mut argv = std::env::args().skip(1);
@@ -463,6 +494,17 @@ async fn run_cmd(a: Args) {
             scale(run.clone(), 4).await;
             ("smoke", 4)
         }
+        s if s.starts_with("rooms:") => {
+            let mut it = s[6..].split(':').map(|v| v.parse::<u32>().unwrap_or_else(|_| usage()));
+            let n = it.next().filter(|&n| n > 0).unwrap_or_else(|| usage());
+            let speakers = it.next().unwrap_or(1);
+            let muted = it.next().unwrap_or(0);
+            if speakers + muted > n {
+                usage();
+            }
+            rooms(run.clone(), n, speakers, muted).await;
+            ("rooms", 3 * n as u64)
+        }
         s if s.starts_with("scale:") => {
             let n: u32 = s[6..].parse().unwrap_or_else(|_| usage());
             scale(run.clone(), n).await;
@@ -470,6 +512,17 @@ async fn run_cmd(a: Args) {
         }
         _ => usage(),
     };
+    // Media stats then cover steady state only, not the join storm.
+    if !a.warmup.is_zero() {
+        tokio::time::sleep(a.warmup).await;
+        for p in run.peers.lock().await.iter() {
+            p.stats.audio.lock().unwrap().clear();
+            p.stats.video.lock().unwrap().clear();
+            let mut sm = p.stats.samples.lock().unwrap();
+            sm.audio_us.clear();
+            sm.video_us.clear();
+        }
+    }
     let measure_from = Instant::now();
     let mut ticker = tokio::time::interval(Duration::from_secs(5));
     ticker.tick().await;
@@ -493,6 +546,8 @@ async fn run_cmd(a: Args) {
     let mut all: Vec<Arc<Stats>> = peers.iter().map(|p| p.stats.clone()).collect();
     all.extend(run.finished.lock().unwrap().iter().cloned());
     let secs = run.started.elapsed().as_secs_f64();
+    // Media counters restart after the warmup.
+    let media_secs = if a.warmup.is_zero() { secs } else { measure_from.elapsed().as_secs_f64() };
 
     let mut audio_acc = Vec::new();
     let mut video_acc = Vec::new();
@@ -527,7 +582,7 @@ async fn run_cmd(a: Args) {
     };
     let report = Report {
         label: a.label,
-        scenario: if scenario == "scale" { a.scenario.clone() } else { scenario.into() },
+        scenario: if matches!(scenario, "scale" | "rooms") { a.scenario.clone() } else { scenario.into() },
         duration_s: secs,
         peers: peers_planned,
         connected,
@@ -536,8 +591,8 @@ async fn run_cmd(a: Args) {
         signaling_errors: errs,
         ws_messages_in: ws,
         presence_events: run.presence_events.load(Ordering::Relaxed),
-        audio: media(audio_acc, a_lat, secs),
-        video: media(video_acc, v_lat, secs),
+        audio: media(audio_acc, a_lat, media_secs),
+        video: media(video_acc, v_lat, media_secs),
         video_frames: frames,
         chat_latency_ms: dist_ms(chat),
         welcome_ms: dist_ms(welcome),
