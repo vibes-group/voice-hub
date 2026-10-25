@@ -20,6 +20,8 @@ pub const PT_VP9_RTX: u8 = 99;
 
 /// Free slot in str0m's standard extension map.
 const DD_EXT_ID: u8 = 12;
+/// MID's ID in str0m's standard extension map.
+const MID_EXT_ID: u8 = 4;
 
 /// NACK history per outgoing video stream: well over one RTT of packets.
 const VIDEO_SEND_BUFFER: usize = 256;
@@ -54,11 +56,22 @@ impl ExtensionSerializer for DdExt {
 /// Builds an `Rtc` in RTP mode with the SFU's codec set and a host
 /// candidate on `socket`. Returns it with its local ICE ufrag.
 pub fn build(socket: &MuxSocket, stats: bool) -> (Rtc, String) {
-    build_with(socket, stats, true)
+    build_cfg(socket, stats, true, false)
+}
+
+/// An audio PC negotiates MID only: it runs no bandwidth estimation and
+/// forwarded packets drop publisher extensions, so transport-wide CC and
+/// audio level would cost per-packet bookkeeping and feedback for nothing.
+pub fn build_audio(socket: &MuxSocket) -> (Rtc, String) {
+    build_cfg(socket, false, true, true)
 }
 
 /// `av1 = false` leaves VP9 as the only video codec (load clients).
 pub fn build_with(socket: &MuxSocket, stats: bool, av1: bool) -> (Rtc, String) {
+    build_cfg(socket, stats, av1, false)
+}
+
+fn build_cfg(socket: &MuxSocket, stats: bool, av1: bool, audio_only: bool) -> (Rtc, String) {
     let ufrag = hex(&random_bytes::<4>());
     let creds = IceCreds { ufrag: ufrag.clone(), pass: hex(&random_bytes::<16>()) };
     let mut cfg = RtcConfig::new()
@@ -69,6 +82,9 @@ pub fn build_with(socket: &MuxSocket, stats: bool, av1: bool) -> (Rtc, String) {
         .set_extension(DD_EXT_ID, Extension::with_serializer(dd::RTP_EXTENSION_URI, DdExt));
     if stats {
         cfg = cfg.set_stats_interval(Some(Duration::from_secs(1)));
+    }
+    if audio_only {
+        cfg = cfg.clear_extension_map().set_extension(MID_EXT_ID, Extension::RtpMid);
     }
     let spec = |codec, clock_rate, channels, format| CodecSpec { codec, clock_rate, channels, format };
     let mut params = vec![

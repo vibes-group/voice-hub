@@ -267,6 +267,30 @@ async fn audio_fans_out_to_everyone_else() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn muted_silence_is_not_forwarded() {
+    let (e, port, c) = served().await;
+    let t = target(port, c);
+    let (a, b) = (peer(&t, 0, false, 2).await, peer(&t, 1, false, 2).await);
+    a.set_state(true);
+    until("server sees A muted", || e.app.rooms["room1"].peers().iter().any(|p| p.self_muted)).await;
+    for n in 0..50u32 {
+        a.send_audio(false, n * 960);
+        b.send_audio(true, n * 960);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    until("A hears B", || a.stats.audio.lock().unwrap().get(&1).is_some_and(|s| s.count > 30)).await;
+    assert!(b.stats.audio.lock().unwrap().get(&0).is_none(), "B got A's muted silence");
+
+    // Speech from a peer whose unmute hasn't landed yet still goes through.
+    for n in 50..100u32 {
+        a.send_audio(true, n * 960);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    until("B hears A's speech", || b.stats.audio.lock().unwrap().get(&0).is_some_and(|s| s.count > 30)).await;
+    assert_eq!(b.stats.audio.lock().unwrap()[&0].lost(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn screen_share_lifecycle_and_layers() {
     let (e, port, c) = served().await;
     let t = target(port, c.clone());

@@ -236,11 +236,17 @@ impl Room {
         let id = new_peer_id();
         let audio = (!hello.chat_only).then(|| AudioPeer::new(&self, id.clone(), cancel.clone()));
         let peer = Arc::new(Peer { id, client_id: hello.client_id, chat_only: hello.chat_only, out: tx, cancel: cancel.clone(), audio });
-        self.add_peer(&peer, hello.display_name);
-        if !peer.chat_only {
-            // Initial sync: subscribe this peer to existing tracks.
-            self.signal_all();
-        }
+        // Signaling runs on blocking-pool threads, so a burst of joins can't
+        // hold up media forwarding on the async worker.
+        let (room, joined) = (self.clone(), peer.clone());
+        let _ = tokio::task::spawn_blocking(move || {
+            room.add_peer(&joined, hello.display_name);
+            if !joined.chat_only {
+                // Initial sync: subscribe this peer to existing tracks.
+                room.signal_all();
+            }
+        })
+        .await;
 
         loop {
             let raw = tokio::select! {
@@ -253,17 +259,22 @@ impl Room {
                     }
                 },
             };
-            let Ok(env) = serde_json::from_str::<Envelope>(&raw) else {
-                log!("sfu: bad json from {}", peer.id);
-                continue;
-            };
-            self.handle_client_message(&peer, &env);
+            let (room, from) = (self.clone(), peer.clone());
+            let _ = tokio::task::spawn_blocking(move || match serde_json::from_str::<Envelope>(&raw) {
+                Ok(env) => room.handle_client_message(&from, &env),
+                Err(_) => log!("sfu: bad json from {}", from.id),
+            })
+            .await;
         }
 
-        self.remove_peer(&peer.id);
-        if let Some(a) = &peer.audio {
-            a.close();
-        }
+        let room = self.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            room.remove_peer(&peer.id);
+            if let Some(a) = &peer.audio {
+                a.close();
+            }
+        })
+        .await;
         let _ = writer.await;
     }
 
@@ -504,6 +515,9 @@ impl Room {
             let Some(e) = st.peers.get_mut(id) else { return };
             e.self_muted = self_muted;
             e.deafened = deafened;
+            if let Some(a) = &e.peer.audio {
+                a.set_muted(self_muted);
+            }
             let info = e.info();
             (info, Self::others(&st, id))
         };
@@ -602,7 +616,7 @@ impl Room {
     /// must not drive other PCs synchronously).
     fn signal_all_async(&self) {
         let room = self.arc();
-        tokio::spawn(async move { room.signal_all() });
+        tokio::task::spawn_blocking(move || room.signal_all());
     }
 
     fn publish_track(&self, track: Arc<AudioTrack>) {

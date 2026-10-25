@@ -69,6 +69,7 @@ impl Mux {
             }
             match UdpSocket::bind(("0.0.0.0", port)).await {
                 Ok(socket) => {
+                    set_recv_buffer(&socket);
                     let public_addr = SocketAddr::new(public_ip, socket.local_addr()?.port());
                     sockets.push(Arc::new(MuxSocket { socket, public_addr, routes: RwLock::default(), ufrags: RwLock::default() }));
                 }
@@ -247,6 +248,32 @@ fn sockaddr_len(a: SocketAddr) -> libc::socklen_t {
         SocketAddr::V6(_) => size_of::<libc::sockaddr_in6>(),
     }) as libc::socklen_t
 }
+
+/// Grows the receive buffer so a busy worker (a burst of joins) doesn't drop
+/// inbound media. The kernel caps it at rmem_max.
+#[cfg(target_os = "linux")]
+fn set_recv_buffer(socket: &UdpSocket) {
+    use std::os::fd::AsRawFd;
+
+    const RECV_BUFFER: libc::c_int = 4 << 20;
+
+    // SAFETY: valid fd and a c_int option value that outlives the call.
+    let r = unsafe {
+        libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            (&RECV_BUFFER as *const libc::c_int).cast(),
+            size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if r != 0 {
+        log!("sfu: SO_RCVBUF: {}", std::io::Error::last_os_error());
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_recv_buffer(_: &UdpSocket) {}
 
 /// For a STUN binding request, the local ufrag from USERNAME ("local:remote").
 fn stun_local_ufrag(b: &[u8]) -> Option<&str> {

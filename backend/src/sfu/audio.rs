@@ -4,6 +4,8 @@
 //! slots and announced with `audio-slots`, so joins and leaves don't touch
 //! the SDP; the pool only grows, in steps, when every slot is taken.
 
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::time::Instant;
 
@@ -25,6 +27,13 @@ const INITIAL_SLOTS: usize = 8;
 const SLOT_GROWTH: usize = 4;
 /// Opus at 48 kHz, 20 ms frames.
 const SAMPLES_PER_FRAME: u32 = 960;
+/// A muted mic sends DTX and comfort-noise frames of a few bytes; speech is
+/// far larger, so a packet above this from a "muted" peer (unmuted before its
+/// set-state arrived) still goes through.
+const MUTED_SILENCE_MAX: usize = 40;
+/// Dropped seqs remembered for reordered packets; older drops are assumed to
+/// precede anything still in flight.
+const SKIPS_KEPT: usize = 64;
 
 /// One published audio track and the slots it is forwarded into.
 pub struct AudioTrack {
@@ -32,6 +41,22 @@ pub struct AudioTrack {
     /// Copy-on-write so the forward path never holds the lock while it
     /// writes into a subscriber PC.
     subs: RwLock<Arc<Vec<Arc<Sub>>>>,
+    /// Owner packets dropped as muted silence. A forwarded packet shifts down
+    /// by the drops before it, so every slot's sequence stays gapless and the
+    /// drop looks like a DTX pause to receivers.
+    skips: Mutex<Skips>,
+}
+
+#[derive(Default)]
+struct Skips {
+    /// Seqs of the latest drops.
+    recent: VecDeque<u64>,
+    /// Drops that left `recent`.
+    older: u64,
+    /// Highest owner seq forwarded.
+    forwarded: u64,
+    /// A drop since the last forwarded packet: the next one starts a talkspurt.
+    resumed: bool,
 }
 
 /// This track's place in one subscriber's slot.
@@ -89,7 +114,7 @@ impl Sub {
 
 impl AudioTrack {
     fn new(owner: &str) -> Arc<AudioTrack> {
-        Arc::new(AudioTrack { owner: owner.to_string(), subs: RwLock::default() })
+        Arc::new(AudioTrack { owner: owner.to_string(), subs: RwLock::default(), skips: Mutex::default() })
     }
 
     fn update(&self, f: impl FnOnce(&mut Vec<Arc<Sub>>)) {
@@ -112,13 +137,14 @@ impl AudioTrack {
     /// publisher, not the subscriber.
     pub fn forward(&self, pkt: &RtpPacket, pt: Pt) {
         let subs = self.subs.read().unwrap().clone();
+        let (in_seq, in_marker) = self.shift(*pkt.seq_no, pkt.header.marker);
         let mut dead = false;
         for sub in subs.iter() {
             if sub.pc.is_closed() {
                 dead = true;
                 continue;
             }
-            let Some((seq, ts, marker)) = sub.map(*pkt.seq_no, pkt.header.timestamp, pkt.header.marker, Instant::now()) else { continue };
+            let Some((seq, ts, marker)) = sub.map(in_seq, pkt.header.timestamp, in_marker, Instant::now()) else { continue };
             sub.pc.write(|rtc| {
                 if let Some(tx) = rtc.direct_api().stream_tx_by_mid(sub.mid, None) {
                     tx.write_rtp(RtpWrite::new(pt, SeqNo::from(seq), ts, pkt.timestamp, pkt.payload.clone()).marker(marker));
@@ -128,6 +154,31 @@ impl AudioTrack {
         if dead {
             self.update(|subs| subs.retain(|s| !s.pc.is_closed()));
         }
+    }
+
+    /// An owner packet's (seq, marker) as the slots see it: past the packets
+    /// dropped before it, marked when it follows a drop.
+    fn shift(&self, seq: u64, marker: bool) -> (u64, bool) {
+        let mut sk = self.skips.lock().unwrap();
+        sk.forwarded = sk.forwarded.max(seq);
+        let dropped = sk.older + sk.recent.iter().filter(|&&s| s < seq).count() as u64;
+        (seq.saturating_sub(dropped), marker || std::mem::take(&mut sk.resumed))
+    }
+
+    /// Drops one owner packet without leaving a hole in the slots. A packet
+    /// older than one already forwarded can't be: its slot seq is taken.
+    fn skip(&self, seq: u64) -> bool {
+        let mut sk = self.skips.lock().unwrap();
+        if seq < sk.forwarded {
+            return false;
+        }
+        sk.recent.push_back(seq);
+        if sk.recent.len() > SKIPS_KEPT {
+            sk.recent.pop_front();
+            sk.older += 1;
+        }
+        sk.resumed = true;
+        true
     }
 }
 
@@ -154,12 +205,14 @@ pub struct AudioPeer {
     sync: Mutex<SyncState>,
     /// This peer's own microphone track, published on its first packet.
     track: OnceLock<Arc<AudioTrack>>,
+    /// Self-muted: its silence isn't worth forwarding to every other peer.
+    muted: AtomicBool,
 }
 
 impl AudioPeer {
     pub fn new(room: &Arc<Room>, peer_id: String, cancel: CancellationToken) -> Arc<AudioPeer> {
         let socket = room.cfg.mux.pick();
-        let (rtc, ufrag) = rtc::build(&socket, false);
+        let (rtc, ufrag) = rtc::build_audio(&socket);
         Arc::new_cyclic(|me: &Weak<AudioPeer>| {
             let handler: Weak<dyn PcHandler> = me.clone();
             AudioPeer {
@@ -169,8 +222,13 @@ impl AudioPeer {
                 cancel,
                 sync: Mutex::default(),
                 track: OnceLock::new(),
+                muted: AtomicBool::new(false),
             }
         })
+    }
+
+    pub fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Relaxed);
     }
 
     pub fn close(&self) {
@@ -304,6 +362,9 @@ impl PcHandler for AudioPeer {
                 }
                 t
             });
+            if self.muted.load(Ordering::Relaxed) && pkt.payload.len() <= MUTED_SILENCE_MAX && track.skip(*pkt.seq_no) {
+                return;
+            }
             track.forward(&pkt, Pt::new_with_value(PT_OPUS));
         }
     }
@@ -348,5 +409,31 @@ mod tests {
         assert_eq!(b.map(8, 123 + 3 * 960, false, t1), Some((6, 960 + 4800 + 3 * 960, false)));
         assert_eq!(b.map(7, 123 + 2 * 960, false, t1), Some((5, 960 + 4800 + 2 * 960, false)));
         assert_eq!(out.last.lock().unwrap().unwrap().0, 6);
+    }
+
+    #[test]
+    fn skipped_packets_leave_no_gap() {
+        let t = AudioTrack::new("a");
+        assert_eq!(t.shift(10, false), (10, false));
+        assert!(t.skip(11) && t.skip(12));
+        assert_eq!(t.shift(13, false), (11, true), "seq closes the gap, talkspurt marked");
+        assert_eq!(t.shift(14, false), (12, false));
+    }
+
+    #[test]
+    fn reordered_packets_keep_distinct_seqs() {
+        // A drop that overtook an older packet doesn't shift that packet.
+        let t = AudioTrack::new("a");
+        assert_eq!(t.shift(99, false), (99, false));
+        assert!(t.skip(101));
+        assert_eq!(t.shift(100, false), (100, true));
+        assert_eq!(t.shift(102, false), (101, false));
+
+        // A late packet behind a forwarded one is forwarded, not dropped.
+        let t = AudioTrack::new("b");
+        assert_eq!(t.shift(102, false), (102, false));
+        assert!(!t.skip(101));
+        assert_eq!(t.shift(101, false), (101, false));
+        assert_eq!(t.shift(103, false), (103, false));
     }
 }
