@@ -515,9 +515,15 @@ impl Pc {
             let ns = self.deadline.load(Ordering::Acquire);
             let at =
                 if ns == 0 { Instant::now() + WATCHDOG } else { (self.epoch + Duration::from_nanos(ns)).min(Instant::now() + WATCHDOG) };
-            tokio::select! {
-                _ = tokio::time::sleep_until(at.into()) => {}
-                _ = self.timer.notified() => {}
+            if at > Instant::now() {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(at.into()) => {}
+                    _ = self.timer.notified() => {}
+                }
+            } else {
+                // Already due: tokio's timer rounds up to the next millisecond,
+                // and writes landing meanwhile don't notify a due deadline.
+                tokio::task::yield_now().await;
             }
             if self.is_closed() {
                 return;
