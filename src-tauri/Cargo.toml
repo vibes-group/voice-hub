@@ -17,7 +17,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-log = "2"
-tauri-plugin-updater = "2"
+# Default "zip" only unpacks Tauri v1 updater bundles; releases ship the bare installer.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
