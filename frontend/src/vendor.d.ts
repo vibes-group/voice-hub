@@ -5,3 +5,13 @@ declare module '*.css';
 interface ImportMeta {
   readonly env: { readonly PROD: boolean };
 }
+
+// Vite asset URL imports (hashed, under /assets/).
+declare module '*?url' {
+  const url: string;
+  export default url;
+}
+declare module '*?worker&url' {
+  const url: string;
+  export default url;
+}

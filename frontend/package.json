@@ -14,8 +14,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "bundle:rnnoise": "node scripts/bundle-rnnoise.mjs"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "5.3.0",
@@ -28,7 +27,6 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@shiguredo/rnnoise-wasm": "2025.1.5",
     "@tailwindcss/vite": "4.3.3",
     "@types/node": "24.13.5",
     "@types/react": "19.3.0",

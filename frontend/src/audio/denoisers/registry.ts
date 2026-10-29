@@ -1,8 +1,25 @@
 import type { Denoiser, DenoiserId } from './types';
-import { rnnoise } from './rnnoise';
+import { createWasmDenoiser } from './worklet-denoiser';
+import rnnoiseWasm from '../wasm/rnnoise.wasm?url';
+import fastenhancerWasm from '../wasm/fastenhancer.wasm?url';
+import fastenhancerTiny from '../wasm/fastenhancer-t.bin?url';
+import fastenhancerBase from '../wasm/fastenhancer-b.bin?url';
 
 export const DENOISERS: Record<DenoiserId, Denoiser> = {
-  rnnoise,
+  rnnoise: createWasmDenoiser({ id: 'rnnoise', label: 'RNNoise', wasmUrl: rnnoiseWasm }),
+  'fastenhancer-t': createWasmDenoiser({
+    id: 'fastenhancer-t',
+    label: 'FastEnhancer',
+    wasmUrl: fastenhancerWasm,
+    weightsUrl: fastenhancerTiny,
+  }),
+  // ~3.5x the CPU of Tiny; kept for listening tests.
+  'fastenhancer-b': createWasmDenoiser({
+    id: 'fastenhancer-b',
+    label: 'FastEnhancer B (тест)',
+    wasmUrl: fastenhancerWasm,
+    weightsUrl: fastenhancerBase,
+  }),
 };
 
 export function getDenoiser(id: string): Denoiser | null {

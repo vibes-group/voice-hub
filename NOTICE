@@ -1,10 +1,9 @@
-voice-hub bundles third-party components under frontend/public/vendor/.
-Each retains its own license:
+voice-hub bundles third-party components. Each retains its own license:
 
-- frontend/public/vendor/rnnoise/  RNNoise WASM upstream (Shiguredo build,
-  @shiguredo/rnnoise-wasm), Apache License 2.0. License file: rnnoise.LICENSE.
-  Includes worklet.js — a build-time bundle of rnnoise.js + our processor
-  (frontend/scripts/bundle-rnnoise.mjs).
-- frontend/public/vendor/rnnoise-old/  Shiguredo's reference AudioWorkletProcessor
-  used by the legacy fallback engine. Apache License 2.0 (covered by the file
-  above).
+- RNNoise (github.com/xiph/rnnoise), BSD 3-Clause, with its pretrained model.
+  Built into frontend/src/audio/wasm/rnnoise.wasm by frontend/wasm/build.sh.
+  License: frontend/public/vendor/rnnoise/LICENSE.
+- FastEnhancer pretrained weights (github.com/aask1357/fastenhancer), MIT.
+  Exported into frontend/src/audio/wasm/fastenhancer-*.bin by
+  frontend/wasm/fastenhancer/export_weights.py.
+  License: frontend/public/vendor/fastenhancer/LICENSE.
