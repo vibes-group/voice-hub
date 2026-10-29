@@ -379,7 +379,7 @@ export function createSFUClient(on: Partial<SFUHandlers> = {}): SFUClient {
       case 'screen-share-encode-pause':
       case 'screen-share-encode-resume':
         if (!isFullLayerSet(msg.data.layers)) {
-          console.warn(`[sfu] partial ${msg.event} not supported, layers=`, msg.data.layers);
+          console.warn('[sfu] partial %s not supported, layers=', msg.event, msg.data.layers);
           break;
         }
         void applyScreenEncodeActive(msg.event === 'screen-share-encode-resume');
@@ -407,7 +407,7 @@ export function createSFUClient(on: Partial<SFUHandlers> = {}): SFUClient {
         }
         const subPC = screenSubs.get(publisherId);
         if (!subPC) {
-          console.warn(`[sfu] screen-sub offer for unknown publisher=${publisherId}`);
+          console.warn('[sfu] screen-sub offer for unknown publisher=%s', publisherId);
           return;
         }
         await subPC.setRemoteDescription({ type: data.type, sdp: data.sdp });
@@ -433,7 +433,7 @@ export function createSFUClient(on: Partial<SFUHandlers> = {}): SFUClient {
   ): Promise<void> {
     // Only our screen-pub offer gets an answer from the SFU.
     if (data.pc !== 'screen-pub') {
-      console.warn(`[sfu] unexpected answer with pc=${data.pc}`);
+      console.warn('[sfu] unexpected answer with pc=%s', data.pc);
       return;
     }
     if (!screenPubPC) {

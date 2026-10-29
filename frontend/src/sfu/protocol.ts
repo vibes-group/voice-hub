@@ -469,7 +469,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   }
   const valid = VALID_PAYLOAD[event as ServerMessage['event']];
   if (typeof data !== 'object' || data === null || !valid(data as Fields)) {
-    console.warn(`[protocol] malformed '${event}' payload:`, data);
+    console.warn("[protocol] malformed '%s' payload:", event, data);
     return null;
   }
   return { event, data } as ServerMessage;

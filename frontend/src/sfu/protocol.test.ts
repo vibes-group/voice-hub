@@ -287,7 +287,8 @@ describe('parseServerMessage', () => {
     const raw = JSON.stringify({ event: 'welcome', data: { id: 'abc' } });
     expect(parseServerMessage(raw)).toBeNull();
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("malformed 'welcome'"),
+      expect.stringContaining('malformed'),
+      'welcome',
       expect.anything(),
     );
     warn.mockRestore();
@@ -341,7 +342,8 @@ describe('parseServerMessage', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     expect(parseServerMessage(JSON.stringify({ event: 'chat-deleted', data: {} }))).toBeNull();
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("malformed 'chat-deleted'"),
+      expect.stringContaining('malformed'),
+      'chat-deleted',
       expect.anything(),
     );
     warn.mockRestore();
