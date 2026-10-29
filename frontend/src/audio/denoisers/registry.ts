@@ -9,14 +9,14 @@ export const DENOISERS: Record<DenoiserId, Denoiser> = {
   rnnoise: createWasmDenoiser({ id: 'rnnoise', label: 'RNNoise', wasmUrl: rnnoiseWasm }),
   'fastenhancer-t': createWasmDenoiser({
     id: 'fastenhancer-t',
-    label: 'FastEnhancer',
+    label: 'FastEnhancer Tiny',
     wasmUrl: fastenhancerWasm,
     weightsUrl: fastenhancerTiny,
   }),
-  // ~3.5x the CPU of Tiny; kept for listening tests.
+  // ~3.5x the CPU of Tiny.
   'fastenhancer-b': createWasmDenoiser({
     id: 'fastenhancer-b',
-    label: 'FastEnhancer B (тест)',
+    label: 'FastEnhancer Base',
     wasmUrl: fastenhancerWasm,
     weightsUrl: fastenhancerBase,
   }),
