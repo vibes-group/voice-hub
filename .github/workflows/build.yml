@@ -24,6 +24,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: backend
+
       # rustup reads backend/rust-toolchain.toml and installs the pinned toolchain.
       - name: Backend checks
         working-directory: backend
@@ -46,8 +50,8 @@ jobs:
           npm run lint
           npm test
 
+  # Runs alongside test; write-env waits for both, so an untested image never deploys.
   build:
-    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -125,7 +129,7 @@ jobs:
           category: trivy-image
 
   write-env:
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

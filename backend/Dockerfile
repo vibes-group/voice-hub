@@ -8,20 +8,29 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN --mount=type=cache,target=/root/.npm npm run build
 
-FROM rust:1.99-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc AS build
+FROM rust:1.99-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc AS chef
 
 WORKDIR /src
 
-COPY backend/Cargo.toml backend/Cargo.lock backend/rust-toolchain.toml ./
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo fetch --locked
+# cook and build share this toolchain; the recipe does not carry it.
+COPY backend/rust-toolchain.toml ./
+RUN cargo install cargo-chef --version 0.1.78 --locked
+
+FROM chef AS planner
 
 COPY backend ./
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/target \
-    cargo build --release --locked --bin voice-hub-app \
- && cp target/release/voice-hub-app /out-voice-hub-app
+FROM chef AS build
+
+COPY --from=planner /src/recipe.json ./
+RUN cargo chef cook --release --locked --bin voice-hub-app --recipe-path recipe.json
+
+COPY backend ./
+# Changes on every commit and lands in the CI layer cache: keep target out of it.
+RUN cargo build --release --locked --bin voice-hub-app \
+ && cp target/release/voice-hub-app /out-voice-hub-app \
+ && rm -rf target
 
 FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
