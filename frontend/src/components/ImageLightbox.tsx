@@ -113,7 +113,7 @@ function Viewer({
         </div>
       </header>
 
-      <div className="relative grid min-h-0 flex-1 place-items-center px-4 pb-4">
+      <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center px-4 pb-4">
         {url ? (
           <img
             src={url}
