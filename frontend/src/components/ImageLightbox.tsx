@@ -71,6 +71,16 @@ function Viewer({
   const current = images[index];
   const { url, status } = useAttachmentUrl(current.uploadId, roomId);
   const multiple = images.length > 1;
+
+  // The page behind is taller than the viewport; keep it from scrolling.
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.overflow;
+    root.style.overflow = 'hidden';
+    return () => {
+      root.style.overflow = previous;
+    };
+  }, []);
   // The container is supported but its codec doesn't decode here.
   const [undecodableId, setUndecodableId] = useState<string | null>(null);
 
