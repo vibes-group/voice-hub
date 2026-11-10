@@ -41,11 +41,27 @@ async function downloadAttachment(att: Attachment, roomId: string): Promise<void
   URL.revokeObjectURL(url);
 }
 
+// Saves the attachments one after another; a failure doesn't stop the rest.
+// Resolves to the ones that failed.
+export async function downloadAttachments(
+  attachments: Attachment[],
+  roomId: string,
+): Promise<Attachment[]> {
+  const failed: Attachment[] = [];
+  for (const att of attachments) {
+    try {
+      await downloadAttachment(att, roomId);
+    } catch {
+      failed.push(att);
+    }
+  }
+  return failed;
+}
+
 type DownloadState = 'idle' | 'busy' | 'failed';
 
-// Download button state for one or several attachments, saved one after
-// another. A failure doesn't stop the rest; the next start retries only the
-// ones that failed.
+// Download button state for one or several attachments. The next start
+// retries only the ones that failed.
 export function useDownload(
   attachments: Attachment[],
   roomId: string,
@@ -59,15 +75,7 @@ export function useDownload(
     if (running.current) return;
     running.current = true;
     setBusy(true);
-    const stillFailed: Attachment[] = [];
-    for (const att of failed.length ? failed : attachments) {
-      try {
-        await downloadAttachment(att, roomId);
-      } catch {
-        stillFailed.push(att);
-      }
-    }
-    setFailed(stillFailed);
+    setFailed(await downloadAttachments(failed.length ? failed : attachments, roomId));
     setBusy(false);
     running.current = false;
   }

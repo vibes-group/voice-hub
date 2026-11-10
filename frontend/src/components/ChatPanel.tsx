@@ -27,7 +27,7 @@ import {
   TEMP_UPLOAD_PREFIX,
 } from '../utils/uploadFile';
 import { isInlineVideo } from '../utils/mediaBox';
-import { useDownload } from '../hooks/useAttachmentUrl';
+import { downloadAttachments } from '../hooks/useAttachmentUrl';
 import { putBlob, getBlob, rekeyBlob, pruneBlobs, deleteBlob } from '../utils/blobCache';
 import { AttachmentImage } from './AttachmentImage';
 import { AttachmentAlbum } from './AttachmentAlbum';
@@ -113,6 +113,15 @@ function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
+
+type MessageMenu = {
+  x: number;
+  y: number;
+  id: string;
+  canDelete: boolean;
+  // Live attachments "download all" saves; empty hides the item.
+  downloads: Attachment[];
+};
 
 interface Props {
   roomId: string;
@@ -494,10 +503,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
 
   // Not optimistic — deletion rides the server's chat-deleted echo, one path
   // for us and every online peer.
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const openMessageMenu = useCallback((x: number, y: number, id: string) => {
-    setMenu({ x, y, id });
-  }, []);
+  const [menu, setMenu] = useState<MessageMenu | null>(null);
   const closeMessageMenu = useCallback(() => setMenu(null), []);
 
   // Transient bottom-right notice, auto-dismissed (mirrors PingToast).
@@ -519,6 +525,15 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
     if (menu && !onDelete(menu.id)) showNotice('Нет соединения — сообщение не удалено');
     setMenu(null);
   }, [menu, onDelete, showNotice]);
+
+  const downloadMenuAttachments = useCallback(async () => {
+    if (!menu) return;
+    setMenu(null);
+    const failed = await downloadAttachments(menu.downloads, roomId);
+    if (failed.length) {
+      showNotice(`Не удалось скачать: ${failed.length} из ${menu.downloads.length}`);
+    }
+  }, [menu, roomId, showNotice]);
 
   return (
     <section
@@ -564,7 +579,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             onImageClick={openLightbox}
             onRetry={retryMessage}
             onDeleteAttachment={deleteAttachment}
-            onRequestMenu={openMessageMenu}
+            onRequestMenu={setMenu}
           />
         ))}
       </div>
@@ -651,7 +666,9 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
         <MessageContextMenu
           x={menu.x}
           y={menu.y}
-          onDelete={confirmDeleteMessage}
+          downloadCount={menu.downloads.length}
+          onDownloadAll={() => void downloadMenuAttachments()}
+          onDelete={menu.canDelete ? confirmDeleteMessage : undefined}
           onClose={closeMessageMenu}
         />
       )}
@@ -701,23 +718,6 @@ const TrayItem = memo(function TrayItem({ file, onRemove }: { file: File; onRemo
   );
 });
 
-function DownloadAll({ attachments, roomId }: { attachments: Attachment[]; roomId: string }) {
-  const { state, start } = useDownload(attachments, roomId);
-  return (
-    <button
-      type="button"
-      disabled={state === 'busy'}
-      onClick={start}
-      className="flex items-center gap-1 self-start text-[11px] text-muted-2 transition-colors hover:text-accent disabled:opacity-60"
-    >
-      <Download size={14} />
-      {state === 'failed'
-        ? 'Не удалось скачать · повторить'
-        : `Скачать все (${attachments.length})`}
-    </button>
-  );
-}
-
 const MessageRow = memo(function MessageRow({
   row,
   roomId,
@@ -731,7 +731,7 @@ const MessageRow = memo(function MessageRow({
   onImageClick: (att: Attachment) => void;
   onRetry: (msg: ChatMessage) => void;
   onDeleteAttachment: (uploadId: string) => void;
-  onRequestMenu: (x: number, y: number, id: string) => void;
+  onRequestMenu: (menu: MessageMenu) => void;
 }) {
   const { msg, isSelf, senderName, showName, showTime, renderedText } = row;
   const attachments = msg.attachments ?? [];
@@ -753,25 +753,30 @@ const MessageRow = memo(function MessageRow({
   };
   useEffect(() => cancelLongPress, []);
 
-  const menuHandlers = canDelete
-    ? {
-        onContextMenu: (e: React.MouseEvent) => {
-          e.preventDefault();
-          onRequestMenu(e.clientX, e.clientY, msg.id);
-        },
-        onTouchStart: (e: React.TouchEvent) => {
-          const { clientX, clientY } = e.touches[0];
-          cancelLongPress();
-          longPressRef.current = setTimeout(() => {
-            longPressRef.current = null;
-            onRequestMenu(clientX, clientY, msg.id);
-          }, 500);
-        },
-        onTouchEnd: cancelLongPress,
-        onTouchMove: cancelLongPress,
-        onTouchCancel: cancelLongPress,
-      }
-    : undefined;
+  // Offered once there is more than one file to save.
+  const downloads = live.length > 1 && !msg.pending ? live : [];
+  const requestMenu = (x: number, y: number) =>
+    onRequestMenu({ x, y, id: msg.id, canDelete, downloads });
+  const menuHandlers =
+    canDelete || downloads.length
+      ? {
+          onContextMenu: (e: React.MouseEvent) => {
+            e.preventDefault();
+            requestMenu(e.clientX, e.clientY);
+          },
+          onTouchStart: (e: React.TouchEvent) => {
+            const { clientX, clientY } = e.touches[0];
+            cancelLongPress();
+            longPressRef.current = setTimeout(() => {
+              longPressRef.current = null;
+              requestMenu(clientX, clientY);
+            }, 500);
+          },
+          onTouchEnd: cancelLongPress,
+          onTouchMove: cancelLongPress,
+          onTouchCancel: cancelLongPress,
+        }
+      : undefined;
 
   return (
     <div
@@ -837,7 +842,6 @@ const MessageRow = memo(function MessageRow({
               />
             ),
           )}
-          {live.length > 1 && !msg.pending && <DownloadAll attachments={live} roomId={roomId} />}
         </div>
       )}
 
@@ -874,15 +878,23 @@ const MessageRow = memo(function MessageRow({
   );
 });
 
+const MENU_ITEM = 'flex w-full items-center gap-2 px-3 py-2 text-left text-[14px] hover:bg-bg-2';
+
+// Lists only what applies: "download all" for a message with several live
+// attachments, "delete" for a confirmed own message.
 function MessageContextMenu({
   x,
   y,
+  downloadCount,
+  onDownloadAll,
   onDelete,
   onClose,
 }: {
   x: number;
   y: number;
-  onDelete: () => void;
+  downloadCount: number;
+  onDownloadAll: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -901,7 +913,7 @@ function MessageContextMenu({
   }, [onClose]);
 
   const left = Math.min(x, window.innerWidth - 200);
-  const top = Math.min(y, window.innerHeight - 64);
+  const top = Math.min(y, window.innerHeight - 104);
 
   return (
     <>
@@ -918,14 +930,18 @@ function MessageContextMenu({
         className="fixed z-50 min-w-[180px] border border-line-strong bg-bg-3 py-1 shadow-lg"
         style={{ left, top }}
       >
-        <button
-          role="menuitem"
-          onClick={onDelete}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[14px] text-danger hover:bg-bg-2"
-        >
-          <Trash2 size={15} />
-          Удалить
-        </button>
+        {downloadCount > 0 && (
+          <button role="menuitem" onClick={onDownloadAll} className={`${MENU_ITEM} text-body`}>
+            <Download size={15} />
+            Скачать все ({downloadCount})
+          </button>
+        )}
+        {onDelete && (
+          <button role="menuitem" onClick={onDelete} className={`${MENU_ITEM} text-danger`}>
+            <Trash2 size={15} />
+            Удалить
+          </button>
+        )}
       </div>
     </>
   );
