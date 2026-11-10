@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Download, Play, Trash2 } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
 import { downloadAttachment, useAttachmentUrl } from '../hooks/useAttachmentUrl';
-import { mediaBoxStyle } from '../utils/mediaBox';
+import { mediaBoxStyle, type MediaSize } from '../utils/mediaBox';
 import { formatFileSize } from './AttachmentFileCard';
 
 type Props = {
@@ -22,17 +22,14 @@ export function AttachmentVideo({ attachment, roomId, onDelete }: Props) {
   const [active, setActive] = useState(false);
   const { url, status, reload } = useAttachmentUrl(attachment.uploadId, roomId, active);
   // Dimensions measured by the player, for attachments sent without them.
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const [natural, setNatural] = useState<MediaSize | null>(null);
   // The container is supported but its codec doesn't decode here.
   const [undecodable, setUndecodable] = useState(false);
 
   return (
     <div
       className="group relative overflow-hidden bg-black"
-      style={mediaBoxStyle(
-        attachment.width || natural?.width,
-        attachment.height || natural?.height,
-      )}
+      style={mediaBoxStyle(attachment, natural)}
     >
       {attachment.blurThumb && !url && (
         <img
@@ -97,7 +94,7 @@ export function AttachmentVideo({ attachment, roomId, onDelete }: Props) {
         </button>
       )}
 
-      <div className="absolute right-1 top-1 hidden gap-1 group-hover:flex">
+      <div className="absolute right-1 top-1 hidden gap-1 group-hover:flex [@media(hover:none)]:flex">
         <button
           type="button"
           aria-label="Скачать"

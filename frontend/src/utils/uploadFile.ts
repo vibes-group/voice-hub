@@ -129,7 +129,8 @@ export async function videoMeta(file: Blob): Promise<ImageMeta | null> {
     });
     if (!video.videoWidth || !video.videoHeight) return null;
     const hasFrame = video.readyState >= video.HAVE_CURRENT_DATA;
-    const blurThumb = hasFrame ? await generateBlurThumb(video) : '';
+    // The thumbnail is optional: a failed frame grab must not fail the send.
+    const blurThumb = hasFrame ? await generateBlurThumb(video).catch(() => '') : '';
     return { width: video.videoWidth, height: video.videoHeight, blurThumb };
   } finally {
     video.removeAttribute('src');

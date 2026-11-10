@@ -14,7 +14,15 @@ const MAX_RATIO = 3;
 // Until the real dimensions are known.
 const FALLBACK_RATIO = 4 / 3;
 
-export function mediaBoxStyle(width?: number, height?: number): CSSProperties {
+export type MediaSize = { width: number; height: number };
+
+// `declared` comes with the attachment; `measured` is what the loaded media
+// reports, for attachments sent without usable dimensions.
+export function mediaBoxStyle(
+  declared: Partial<MediaSize>,
+  measured?: MediaSize | null,
+): CSSProperties {
+  const { width, height } = declared.width && declared.height ? declared : (measured ?? {});
   const known = width !== undefined && height !== undefined && width > 0 && height > 0;
   const ratio = +(
     known ? Math.min(MAX_RATIO, Math.max(MIN_RATIO, width / height)) : FALLBACK_RATIO

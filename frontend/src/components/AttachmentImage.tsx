@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ImageOff, Trash2 } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
 import { useAttachmentUrl } from '../hooks/useAttachmentUrl';
-import { mediaBoxStyle } from '../utils/mediaBox';
+import { mediaBoxStyle, type MediaSize } from '../utils/mediaBox';
 
 type Props = {
   attachment: Attachment;
@@ -32,10 +32,8 @@ export function AttachmentImage({
   }, [url]);
 
   // Dimensions measured on load, for attachments sent without them.
-  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
-  const containerStyle = fill
-    ? undefined
-    : mediaBoxStyle(attachment.width || natural?.width, attachment.height || natural?.height);
+  const [natural, setNatural] = useState<MediaSize | null>(null);
+  const containerStyle = fill ? undefined : mediaBoxStyle(attachment, natural);
   const containerClass = `group overflow-hidden bg-bg-2 ${fill ? 'absolute inset-0' : 'relative'}`;
 
   if (deleted) {

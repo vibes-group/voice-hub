@@ -718,10 +718,6 @@ const MessageRow = memo(function MessageRow({
   const images = attachments.filter((a) => a.kind === 'image');
   const isDeleted = (uploadId: string) => msg.deletedUploadIds?.includes(uploadId) ?? false;
   const files = attachments.filter((a) => a.kind === 'file');
-  // A deleted video falls back to the file card's "deleted" state.
-  const isVideo = (a: Attachment) => isInlineVideo(a.mime) && !isDeleted(a.uploadId);
-  const videos = files.filter(isVideo);
-  const fileCards = files.filter((a) => !isVideo(a));
   const uploading =
     msg.pending && !msg.uploadFailed && msg.uploadProgress !== undefined && msg.uploadProgress < 1;
 
@@ -800,23 +796,25 @@ const MessageRow = memo(function MessageRow({
               isDeleted={isDeleted}
             />
           )}
-          {videos.map((att) => (
-            <AttachmentVideo
-              key={att.uploadId}
-              attachment={att}
-              roomId={roomId}
-              onDelete={() => onDeleteAttachment(att.uploadId)}
-            />
-          ))}
-          {fileCards.map((att) => (
-            <AttachmentFileCard
-              key={att.uploadId}
-              attachment={att}
-              roomId={roomId}
-              deleted={isDeleted(att.uploadId)}
-              onDelete={() => onDeleteAttachment(att.uploadId)}
-            />
-          ))}
+          {files.map((att) =>
+            // A deleted video falls back to the file card's "deleted" state.
+            isInlineVideo(att.mime) && !isDeleted(att.uploadId) ? (
+              <AttachmentVideo
+                key={att.uploadId}
+                attachment={att}
+                roomId={roomId}
+                onDelete={() => onDeleteAttachment(att.uploadId)}
+              />
+            ) : (
+              <AttachmentFileCard
+                key={att.uploadId}
+                attachment={att}
+                roomId={roomId}
+                deleted={isDeleted(att.uploadId)}
+                onDelete={() => onDeleteAttachment(att.uploadId)}
+              />
+            ),
+          )}
         </div>
       )}
 
