@@ -462,14 +462,16 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
     });
   }, [messages, participants, selfClientId, selfPeerId]);
 
-  // Flat list of every live image in the visible chat, so the lightbox can page
-  // across all of them with ←/→ regardless of which message they belong to.
-  // Deleted images are excluded — they have no bytes to show.
+  // Flat list of every live image and playable video in the visible chat, so
+  // the lightbox can page across all of them with ←/→ regardless of which
+  // message they belong to. Deleted ones are excluded — they have no bytes to show.
   const imageList = useMemo<Attachment[]>(
     () =>
       visible.flatMap((v) =>
         (v.msg.attachments ?? []).filter(
-          (a) => a.kind === 'image' && !v.msg.deletedUploadIds?.includes(a.uploadId),
+          (a) =>
+            (a.kind === 'image' || isInlineVideo(a.mime)) &&
+            !v.msg.deletedUploadIds?.includes(a.uploadId),
         ),
       ),
     [visible],
@@ -803,6 +805,7 @@ const MessageRow = memo(function MessageRow({
                 key={att.uploadId}
                 attachment={att}
                 roomId={roomId}
+                onClick={() => onImageClick(att)}
                 onDelete={() => onDeleteAttachment(att.uploadId)}
               />
             ) : (
