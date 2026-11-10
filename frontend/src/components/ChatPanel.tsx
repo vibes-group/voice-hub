@@ -19,10 +19,18 @@ import {
 import { loadOrCreateClientId } from '../utils/storage';
 import { Send, Info, Paperclip, X, Trash2, WifiOff } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
-import { uploadFile, imageMeta, MAX_UPLOAD_BYTES, TEMP_UPLOAD_PREFIX } from '../utils/uploadFile';
+import {
+  uploadFile,
+  imageMeta,
+  videoMeta,
+  MAX_UPLOAD_BYTES,
+  TEMP_UPLOAD_PREFIX,
+} from '../utils/uploadFile';
+import { isInlineVideo } from '../utils/mediaBox';
 import { putBlob, getBlob, rekeyBlob, pruneBlobs, deleteBlob } from '../utils/blobCache';
 import { AttachmentImage } from './AttachmentImage';
 import { AttachmentAlbum } from './AttachmentAlbum';
+import { AttachmentVideo } from './AttachmentVideo';
 import { AttachmentFileCard, formatFileSize } from './AttachmentFileCard';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -300,9 +308,13 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             mime: file.type || 'application/octet-stream',
             size: file.size,
           };
-          if (kind !== 'image') return att;
-          const meta = await imageMeta(file);
-          return { ...att, width: meta?.width, height: meta?.height, blurThumb: meta?.blurThumb };
+          const meta =
+            kind === 'image'
+              ? await imageMeta(file)
+              : isInlineVideo(att.mime)
+                ? await videoMeta(file)
+                : null;
+          return meta ? { ...att, ...meta } : att;
         }),
       );
 
@@ -704,8 +716,12 @@ const MessageRow = memo(function MessageRow({
   const { msg, isSelf, senderName, showName, showTime, renderedText } = row;
   const attachments = msg.attachments ?? [];
   const images = attachments.filter((a) => a.kind === 'image');
-  const fileCards = attachments.filter((a) => a.kind === 'file');
   const isDeleted = (uploadId: string) => msg.deletedUploadIds?.includes(uploadId) ?? false;
+  const files = attachments.filter((a) => a.kind === 'file');
+  // A deleted video falls back to the file card's "deleted" state.
+  const isVideo = (a: Attachment) => isInlineVideo(a.mime) && !isDeleted(a.uploadId);
+  const videos = files.filter(isVideo);
+  const fileCards = files.filter((a) => !isVideo(a));
   const uploading =
     msg.pending && !msg.uploadFailed && msg.uploadProgress !== undefined && msg.uploadProgress < 1;
 
@@ -784,6 +800,14 @@ const MessageRow = memo(function MessageRow({
               isDeleted={isDeleted}
             />
           )}
+          {videos.map((att) => (
+            <AttachmentVideo
+              key={att.uploadId}
+              attachment={att}
+              roomId={roomId}
+              onDelete={() => onDeleteAttachment(att.uploadId)}
+            />
+          ))}
           {fileCards.map((att) => (
             <AttachmentFileCard
               key={att.uploadId}

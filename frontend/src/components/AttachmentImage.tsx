@@ -1,7 +1,8 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState } from 'react';
 import { ImageOff, Trash2 } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
 import { useAttachmentUrl } from '../hooks/useAttachmentUrl';
+import { mediaBoxStyle } from '../utils/mediaBox';
 
 type Props = {
   attachment: Attachment;
@@ -13,8 +14,6 @@ type Props = {
   // itself from its intrinsic aspect ratio.
   fill?: boolean;
 };
-
-const MAX_WIDTH = 320;
 
 export function AttachmentImage({
   attachment,
@@ -32,16 +31,12 @@ export function AttachmentImage({
     setLoaded(false);
   }, [url]);
 
-  const aspectRatio =
-    attachment.width && attachment.height
-      ? `${attachment.width} / ${attachment.height}`
-      : undefined;
-  const containerStyle: CSSProperties = {
-    maxWidth: fill ? undefined : MAX_WIDTH,
-    aspectRatio: fill ? undefined : aspectRatio,
-    minHeight: fill || aspectRatio ? undefined : 80,
-  };
-  const containerClass = `group relative overflow-hidden bg-bg-2 ${fill ? 'h-full w-full' : 'block w-full'}`;
+  // Dimensions measured on load, for attachments sent without them.
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const containerStyle = fill
+    ? undefined
+    : mediaBoxStyle(attachment.width || natural?.width, attachment.height || natural?.height);
+  const containerClass = `group overflow-hidden bg-bg-2 ${fill ? 'absolute inset-0' : 'relative'}`;
 
   if (deleted) {
     return (
@@ -59,7 +54,7 @@ export function AttachmentImage({
       <button
         type="button"
         onClick={onClick}
-        className="block h-full w-full"
+        className="absolute inset-0"
         aria-label={attachment.name}
       >
         {attachment.blurThumb ? (
@@ -78,8 +73,12 @@ export function AttachmentImage({
           <img
             src={url}
             alt={attachment.name}
-            onLoad={() => setLoaded(true)}
-            className="relative h-full w-full object-cover transition-opacity duration-300"
+            onLoad={(e) => {
+              const { naturalWidth: width, naturalHeight: height } = e.currentTarget;
+              setNatural({ width, height });
+              setLoaded(true);
+            }}
+            className="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
             style={{ opacity: loaded ? 1 : 0 }}
           />
         )}

@@ -25,7 +25,7 @@ export function AttachmentAlbum({ images, roomId, onOpen, onDelete, isDeleted }:
   );
 
   const cell = (att: Attachment, overlay?: number) => (
-    <div key={att.uploadId} className="relative">
+    <div key={att.uploadId} className="relative h-full">
       {tile(att)}
       {overlay !== undefined && overlay > 0 && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center bg-black/60 text-2xl font-bold text-white">
@@ -39,7 +39,7 @@ export function AttachmentAlbum({ images, roomId, onOpen, onDelete, isDeleted }:
     return (
       <div className={`${WRAP} grid-cols-2`}>
         {images.map((img) => (
-          <div key={img.uploadId} className="aspect-square">
+          <div key={img.uploadId} className="relative aspect-square">
             {tile(img)}
           </div>
         ))}
