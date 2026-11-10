@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ImageOff, Trash2 } from 'lucide-react';
+import { ImageOff } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
 import { useAttachmentUrl } from '../hooks/useAttachmentUrl';
+import { MediaActions } from './MediaActions';
 import { mediaBoxStyle, type MediaSize } from '../utils/mediaBox';
 
 type Props = {
@@ -99,20 +100,7 @@ export function AttachmentImage({
         )}
       </button>
 
-      {onDelete && (
-        <button
-          type="button"
-          aria-label="Удалить файл"
-          title="Удалить (освободить место)"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="absolute right-1 top-1 hidden place-items-center bg-black/60 p-1 text-white transition-colors hover:bg-black/80 group-hover:grid"
-        >
-          <Trash2 size={16} />
-        </button>
-      )}
+      <MediaActions attachment={attachment} roomId={roomId} onDelete={onDelete} />
     </div>
   );
 }

@@ -1,8 +1,8 @@
-import { Download, Play, Trash2 } from 'lucide-react';
+import { Play } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
-import { downloadAttachment } from '../hooks/useAttachmentUrl';
 import { mediaBoxStyle } from '../utils/mediaBox';
 import { formatFileSize } from './AttachmentFileCard';
+import { MediaActions } from './MediaActions';
 
 type Props = {
   attachment: Attachment;
@@ -10,9 +10,6 @@ type Props = {
   onClick: () => void;
   onDelete?: () => void;
 };
-
-const OVERLAY_BUTTON =
-  'grid place-items-center bg-black/60 p-1 text-white transition-colors hover:bg-black/80';
 
 // Video poster in the message list; it plays in the lightbox. Unlike images the
 // bytes are not fetched here: a video can be up to the upload limit in size.
@@ -43,28 +40,7 @@ export function AttachmentVideo({ attachment, roomId, onClick, onDelete }: Props
         </span>
       </button>
 
-      <div className="absolute right-1 top-1 hidden gap-1 group-hover:flex [@media(hover:none)]:flex">
-        <button
-          type="button"
-          aria-label="Скачать"
-          title="Скачать"
-          onClick={() => void downloadAttachment(attachment, roomId)}
-          className={OVERLAY_BUTTON}
-        >
-          <Download size={16} />
-        </button>
-        {onDelete && (
-          <button
-            type="button"
-            aria-label="Удалить файл"
-            title="Удалить (освободить место)"
-            onClick={onDelete}
-            className={OVERLAY_BUTTON}
-          >
-            <Trash2 size={16} />
-          </button>
-        )}
-      </div>
+      <MediaActions attachment={attachment} roomId={roomId} onDelete={onDelete} />
     </div>
   );
 }

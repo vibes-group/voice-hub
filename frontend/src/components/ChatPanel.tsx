@@ -17,7 +17,7 @@ import {
   type AttachmentKind,
 } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
-import { Send, Info, Paperclip, X, Trash2, WifiOff } from 'lucide-react';
+import { Send, Info, Paperclip, X, Trash2, WifiOff, Download } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
 import {
   uploadFile,
@@ -27,6 +27,7 @@ import {
   TEMP_UPLOAD_PREFIX,
 } from '../utils/uploadFile';
 import { isInlineVideo } from '../utils/mediaBox';
+import { useDownload } from '../hooks/useAttachmentUrl';
 import { putBlob, getBlob, rekeyBlob, pruneBlobs, deleteBlob } from '../utils/blobCache';
 import { AttachmentImage } from './AttachmentImage';
 import { AttachmentAlbum } from './AttachmentAlbum';
@@ -700,6 +701,23 @@ const TrayItem = memo(function TrayItem({ file, onRemove }: { file: File; onRemo
   );
 });
 
+function DownloadAll({ attachments, roomId }: { attachments: Attachment[]; roomId: string }) {
+  const { state, start } = useDownload(attachments, roomId);
+  return (
+    <button
+      type="button"
+      disabled={state === 'busy'}
+      onClick={start}
+      className="flex items-center gap-1 self-start text-[11px] text-muted-2 transition-colors hover:text-accent disabled:opacity-60"
+    >
+      <Download size={14} />
+      {state === 'failed'
+        ? 'Не удалось скачать · повторить'
+        : `Скачать все (${attachments.length})`}
+    </button>
+  );
+}
+
 const MessageRow = memo(function MessageRow({
   row,
   roomId,
@@ -720,6 +738,7 @@ const MessageRow = memo(function MessageRow({
   const images = attachments.filter((a) => a.kind === 'image');
   const isDeleted = (uploadId: string) => msg.deletedUploadIds?.includes(uploadId) ?? false;
   const files = attachments.filter((a) => a.kind === 'file');
+  const live = attachments.filter((a) => !isDeleted(a.uploadId));
   const uploading =
     msg.pending && !msg.uploadFailed && msg.uploadProgress !== undefined && msg.uploadProgress < 1;
 
@@ -818,6 +837,7 @@ const MessageRow = memo(function MessageRow({
               />
             ),
           )}
+          {live.length > 1 && !msg.pending && <DownloadAll attachments={live} roomId={roomId} />}
         </div>
       )}
 

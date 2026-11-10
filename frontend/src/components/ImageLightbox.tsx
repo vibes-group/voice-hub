@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Trash2, X } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
-import { useAttachmentUrl, downloadAttachment } from '../hooks/useAttachmentUrl';
+import { useAttachmentUrl, useDownload } from '../hooks/useAttachmentUrl';
 import { isInlineVideo } from '../utils/mediaBox';
 
 type Props = {
@@ -99,14 +99,7 @@ function Viewer({
           )}
         </span>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void downloadAttachment(current, roomId)}
-            aria-label="Скачать"
-            className="rounded p-1 mobile:p-3.5 hover:bg-white/10"
-          >
-            <Download size={18} strokeWidth={2.25} />
-          </button>
+          <DownloadButton key={current.uploadId} attachment={current} roomId={roomId} />
           <button
             type="button"
             onClick={() => {
@@ -185,5 +178,21 @@ function Viewer({
         )}
       </div>
     </div>
+  );
+}
+
+function DownloadButton({ attachment, roomId }: { attachment: Attachment; roomId: string }) {
+  const { state, start } = useDownload([attachment], roomId);
+  return (
+    <button
+      type="button"
+      onClick={start}
+      disabled={state === 'busy'}
+      aria-label="Скачать"
+      title={state === 'failed' ? 'Не удалось скачать · повторить' : 'Скачать'}
+      className={`rounded p-1 mobile:p-3.5 hover:bg-white/10 disabled:opacity-60 ${state === 'failed' ? 'text-danger' : ''}`}
+    >
+      <Download size={18} strokeWidth={2.25} />
+    </button>
   );
 }
