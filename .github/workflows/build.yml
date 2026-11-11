@@ -2,7 +2,7 @@ name: Build and deploy
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -138,7 +138,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: vibes-group/deploy
-          ref: master
+          ref: main
           persist-credentials: false
 
       - uses: ./.github/actions/write-env
@@ -157,7 +157,7 @@ jobs:
     needs: [build, write-env]
     permissions:
       contents: read
-    uses: vibes-group/deploy/.github/workflows/deploy.yml@master
+    uses: vibes-group/deploy/.github/workflows/deploy.yml@main
     with:
       app: voice-hub
       wait-for-idle: true

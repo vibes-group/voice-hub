@@ -2,7 +2,7 @@ name: Security
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
   schedule:
     # Weekly: new advisories arrive for code that has not changed.

@@ -2,7 +2,7 @@ name: Auto-tag Desktop
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - 'src-tauri/**'
   workflow_dispatch:
@@ -97,7 +97,7 @@ jobs:
           if [ "$MODE" = "bump" ]; then
             git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
             git commit -m "chore(desktop): bump $CURRENT → $NEW"
-            git push origin master
+            git push origin main
           fi
 
           git tag "$TAG"

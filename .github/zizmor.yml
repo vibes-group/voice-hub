@@ -2,7 +2,7 @@ rules:
   unpinned-uses:
     config:
       policies:
-        # This org's own reusable workflows and actions track master on purpose.
+        # This org's own reusable workflows and actions track main on purpose.
         vibes-group/*: ref-pin
         "*": hash-pin
   self-repository:
