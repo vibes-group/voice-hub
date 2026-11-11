@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Attachment } from '../sfu/protocol';
 import { getBlob, putBlob } from '../utils/blobCache';
 
@@ -27,9 +27,10 @@ async function resolveAttachmentBlob(
 
 // Triggers a browser/WebView download of the attachment via a synthetic anchor.
 // In Tauri's WebView2 this opens the OS save dialog; no plugin required.
-export async function downloadAttachment(att: Attachment, roomId: string): Promise<void> {
+// Throws when the bytes can't be had, including an upload the server evicted.
+async function downloadAttachment(att: Attachment, roomId: string): Promise<void> {
   const blob = await resolveAttachmentBlob(att.uploadId, roomId);
-  if (!blob) return;
+  if (!blob) throw new Error('attachment unavailable');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -38,6 +39,48 @@ export async function downloadAttachment(att: Attachment, roomId: string): Promi
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// Saves the attachments one after another; a failure doesn't stop the rest.
+// Resolves to the ones that failed.
+export async function downloadAttachments(
+  attachments: Attachment[],
+  roomId: string,
+): Promise<Attachment[]> {
+  const failed: Attachment[] = [];
+  for (const att of attachments) {
+    try {
+      await downloadAttachment(att, roomId);
+    } catch {
+      failed.push(att);
+    }
+  }
+  return failed;
+}
+
+type DownloadState = 'idle' | 'busy' | 'failed';
+
+// Download button state for one or several attachments. The next start
+// retries only the ones that failed.
+export function useDownload(
+  attachments: Attachment[],
+  roomId: string,
+): { state: DownloadState; start: () => void } {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<Attachment[]>([]);
+  // Guards against a second click landing before the disabled state renders.
+  const running = useRef(false);
+
+  async function run() {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setFailed(await downloadAttachments(failed.length ? failed : attachments, roomId));
+    setBusy(false);
+    running.current = false;
+  }
+
+  return { state: busy ? 'busy' : failed.length ? 'failed' : 'idle', start: () => void run() };
 }
 
 type AttachmentUrlStatus = 'loading' | 'ready' | 'unavailable' | 'error';

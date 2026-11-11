@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Trash2, X } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
-import { useAttachmentUrl, downloadAttachment } from '../hooks/useAttachmentUrl';
+import { useAttachmentUrl, useDownload } from '../hooks/useAttachmentUrl';
+import { isInlineVideo } from '../utils/mediaBox';
 
 type Props = {
   images: Attachment[];
@@ -12,8 +13,8 @@ type Props = {
   onDelete: (att: Attachment) => void;
 };
 
-// Fullscreen image viewer (modeled on ScreenShareFocused). ←/→ page across
-// every image in the visible chat, not just one message's album.
+// Fullscreen image and video viewer (modeled on ScreenShareFocused). ←/→ page
+// across every image and video in the visible chat, not just one message's album.
 export function ImageLightbox({ images, index, roomId, onClose, onNavigate, onDelete }: Props) {
   const open = index !== null && index >= 0 && index < images.length;
 
@@ -22,7 +23,11 @@ export function ImageLightbox({ images, index, roomId, onClose, onNavigate, onDe
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         onClose();
-      } else if (e.key === 'ArrowRight' && images.length > 1) {
+        return;
+      }
+      // A focused player seeks with the arrows.
+      if (e.target instanceof HTMLVideoElement) return;
+      if (e.key === 'ArrowRight' && images.length > 1) {
         e.preventDefault();
         onNavigate((index! + 1) % images.length);
       } else if (e.key === 'ArrowLeft' && images.length > 1) {
@@ -67,6 +72,18 @@ function Viewer({
   const { url, status } = useAttachmentUrl(current.uploadId, roomId);
   const multiple = images.length > 1;
 
+  // The page behind is taller than the viewport; keep it from scrolling.
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.style.overflow;
+    root.style.overflow = 'hidden';
+    return () => {
+      root.style.overflow = previous;
+    };
+  }, []);
+  // The container is supported but its codec doesn't decode here.
+  const [undecodableId, setUndecodableId] = useState<string | null>(null);
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={onClose}>
       <header
@@ -82,14 +99,7 @@ function Viewer({
           )}
         </span>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void downloadAttachment(current, roomId)}
-            aria-label="Скачать"
-            className="rounded p-1 mobile:p-3.5 hover:bg-white/10"
-          >
-            <Download size={18} strokeWidth={2.25} />
-          </button>
+          <DownloadButton key={current.uploadId} attachment={current} roomId={roomId} />
           <button
             type="button"
             onClick={() => {
@@ -113,8 +123,21 @@ function Viewer({
         </div>
       </header>
 
-      <div className="relative grid min-h-0 flex-1 place-items-center px-4 pb-4">
-        {url ? (
+      <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center px-4 pb-4">
+        {undecodableId === current.uploadId ? (
+          <div className="text-sm text-zinc-400">Не воспроизводится — скачайте файл</div>
+        ) : url && isInlineVideo(current.mime) ? (
+          <video
+            key={current.uploadId}
+            src={url}
+            controls
+            autoPlay
+            playsInline
+            className="max-h-full max-w-full"
+            onClick={(e) => e.stopPropagation()}
+            onError={() => setUndecodableId(current.uploadId)}
+          />
+        ) : url ? (
           <img
             src={url}
             alt={current.name}
@@ -155,5 +178,21 @@ function Viewer({
         )}
       </div>
     </div>
+  );
+}
+
+function DownloadButton({ attachment, roomId }: { attachment: Attachment; roomId: string }) {
+  const { state, start } = useDownload([attachment], roomId);
+  return (
+    <button
+      type="button"
+      onClick={start}
+      disabled={state === 'busy'}
+      aria-label="Скачать"
+      title={state === 'failed' ? 'Не удалось скачать · повторить' : 'Скачать'}
+      className={`rounded p-1 mobile:p-3.5 hover:bg-white/10 disabled:opacity-60 ${state === 'failed' ? 'text-danger' : ''}`}
+    >
+      <Download size={18} strokeWidth={2.25} />
+    </button>
   );
 }

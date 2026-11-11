@@ -169,7 +169,10 @@ export const CHAT_MAX_BYTES = 2000;
 /** Max attachments per chat message; mirrors protocol::CHAT_MAX_ATTACHMENTS. */
 export const CHAT_MAX_ATTACHMENTS = 10;
 
-/** Renders as an inline image preview ('image') or a download card ('file'). */
+/**
+ * Renders as an inline image preview ('image') or a download card ('file').
+ * A playable video is a 'file' with a video/* mime, rendered as an inline player.
+ */
 export type AttachmentKind = 'image' | 'file';
 
 /**
@@ -177,9 +180,9 @@ export type AttachmentKind = 'image' | 'file';
  * (upload/download endpoints, keyed by uploadId), never over the WS. Mirrors
  * protocol::Attachment in the backend.
  *
- * width/height/blurThumb are image-only hints: dimensions reserve layout space
- * without a reflow, blurThumb is a tiny base64 JPEG data URL placeholder shown
- * until the full image resolves.
+ * width/height/blurThumb are image/video-only hints: dimensions reserve layout
+ * space without a reflow, blurThumb is a tiny base64 JPEG data URL placeholder
+ * shown until the full media resolves.
  */
 export type Attachment = {
   uploadId: string;

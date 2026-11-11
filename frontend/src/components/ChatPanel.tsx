@@ -17,12 +17,21 @@ import {
   type AttachmentKind,
 } from '../sfu/protocol';
 import { loadOrCreateClientId } from '../utils/storage';
-import { Send, Info, Paperclip, X, Trash2, WifiOff } from 'lucide-react';
+import { Send, Info, Paperclip, X, Trash2, WifiOff, Download } from 'lucide-react';
 import { isTauri } from '../utils/tauri';
-import { uploadFile, imageMeta, MAX_UPLOAD_BYTES, TEMP_UPLOAD_PREFIX } from '../utils/uploadFile';
+import {
+  uploadFile,
+  imageMeta,
+  videoMeta,
+  MAX_UPLOAD_BYTES,
+  TEMP_UPLOAD_PREFIX,
+} from '../utils/uploadFile';
+import { isInlineVideo } from '../utils/mediaBox';
+import { downloadAttachments } from '../hooks/useAttachmentUrl';
 import { putBlob, getBlob, rekeyBlob, pruneBlobs, deleteBlob } from '../utils/blobCache';
 import { AttachmentImage } from './AttachmentImage';
 import { AttachmentAlbum } from './AttachmentAlbum';
+import { AttachmentVideo } from './AttachmentVideo';
 import { AttachmentFileCard, formatFileSize } from './AttachmentFileCard';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -104,6 +113,15 @@ function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
+
+type MessageMenu = {
+  x: number;
+  y: number;
+  id: string;
+  canDelete: boolean;
+  // Live attachments "download all" saves; empty hides the item.
+  downloads: Attachment[];
+};
 
 interface Props {
   roomId: string;
@@ -300,9 +318,13 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             mime: file.type || 'application/octet-stream',
             size: file.size,
           };
-          if (kind !== 'image') return att;
-          const meta = await imageMeta(file);
-          return { ...att, width: meta?.width, height: meta?.height, blurThumb: meta?.blurThumb };
+          const meta =
+            kind === 'image'
+              ? await imageMeta(file)
+              : isInlineVideo(att.mime)
+                ? await videoMeta(file)
+                : null;
+          return meta ? { ...att, ...meta } : att;
         }),
       );
 
@@ -450,14 +472,16 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
     });
   }, [messages, participants, selfClientId, selfPeerId]);
 
-  // Flat list of every live image in the visible chat, so the lightbox can page
-  // across all of them with ←/→ regardless of which message they belong to.
-  // Deleted images are excluded — they have no bytes to show.
+  // Flat list of every live image and playable video in the visible chat, so
+  // the lightbox can page across all of them with ←/→ regardless of which
+  // message they belong to. Deleted ones are excluded — they have no bytes to show.
   const imageList = useMemo<Attachment[]>(
     () =>
       visible.flatMap((v) =>
         (v.msg.attachments ?? []).filter(
-          (a) => a.kind === 'image' && !v.msg.deletedUploadIds?.includes(a.uploadId),
+          (a) =>
+            (a.kind === 'image' || isInlineVideo(a.mime)) &&
+            !v.msg.deletedUploadIds?.includes(a.uploadId),
         ),
       ),
     [visible],
@@ -479,10 +503,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
 
   // Not optimistic — deletion rides the server's chat-deleted echo, one path
   // for us and every online peer.
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const openMessageMenu = useCallback((x: number, y: number, id: string) => {
-    setMenu({ x, y, id });
-  }, []);
+  const [menu, setMenu] = useState<MessageMenu | null>(null);
   const closeMessageMenu = useCallback(() => setMenu(null), []);
 
   // Transient bottom-right notice, auto-dismissed (mirrors PingToast).
@@ -504,6 +525,15 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
     if (menu && !onDelete(menu.id)) showNotice('Нет соединения — сообщение не удалено');
     setMenu(null);
   }, [menu, onDelete, showNotice]);
+
+  const downloadMenuAttachments = useCallback(async () => {
+    if (!menu) return;
+    setMenu(null);
+    const failed = await downloadAttachments(menu.downloads, roomId);
+    if (failed.length) {
+      showNotice(`Не удалось скачать: ${failed.length} из ${menu.downloads.length}`);
+    }
+  }, [menu, roomId, showNotice]);
 
   return (
     <section
@@ -549,7 +579,7 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
             onImageClick={openLightbox}
             onRetry={retryMessage}
             onDeleteAttachment={deleteAttachment}
-            onRequestMenu={openMessageMenu}
+            onRequestMenu={setMenu}
           />
         ))}
       </div>
@@ -636,7 +666,9 @@ export function ChatPanel({ roomId, onSend, onDelete }: Props) {
         <MessageContextMenu
           x={menu.x}
           y={menu.y}
-          onDelete={confirmDeleteMessage}
+          downloadCount={menu.downloads.length}
+          onDownloadAll={() => void downloadMenuAttachments()}
+          onDelete={menu.canDelete ? confirmDeleteMessage : undefined}
           onClose={closeMessageMenu}
         />
       )}
@@ -699,13 +731,14 @@ const MessageRow = memo(function MessageRow({
   onImageClick: (att: Attachment) => void;
   onRetry: (msg: ChatMessage) => void;
   onDeleteAttachment: (uploadId: string) => void;
-  onRequestMenu: (x: number, y: number, id: string) => void;
+  onRequestMenu: (menu: MessageMenu) => void;
 }) {
   const { msg, isSelf, senderName, showName, showTime, renderedText } = row;
   const attachments = msg.attachments ?? [];
   const images = attachments.filter((a) => a.kind === 'image');
-  const fileCards = attachments.filter((a) => a.kind === 'file');
   const isDeleted = (uploadId: string) => msg.deletedUploadIds?.includes(uploadId) ?? false;
+  const files = attachments.filter((a) => a.kind === 'file');
+  const live = attachments.filter((a) => !isDeleted(a.uploadId));
   const uploading =
     msg.pending && !msg.uploadFailed && msg.uploadProgress !== undefined && msg.uploadProgress < 1;
 
@@ -720,25 +753,30 @@ const MessageRow = memo(function MessageRow({
   };
   useEffect(() => cancelLongPress, []);
 
-  const menuHandlers = canDelete
-    ? {
-        onContextMenu: (e: React.MouseEvent) => {
-          e.preventDefault();
-          onRequestMenu(e.clientX, e.clientY, msg.id);
-        },
-        onTouchStart: (e: React.TouchEvent) => {
-          const { clientX, clientY } = e.touches[0];
-          cancelLongPress();
-          longPressRef.current = setTimeout(() => {
-            longPressRef.current = null;
-            onRequestMenu(clientX, clientY, msg.id);
-          }, 500);
-        },
-        onTouchEnd: cancelLongPress,
-        onTouchMove: cancelLongPress,
-        onTouchCancel: cancelLongPress,
-      }
-    : undefined;
+  // Offered once there is more than one file to save.
+  const downloads = live.length > 1 && !msg.pending ? live : [];
+  const requestMenu = (x: number, y: number) =>
+    onRequestMenu({ x, y, id: msg.id, canDelete, downloads });
+  const menuHandlers =
+    canDelete || downloads.length
+      ? {
+          onContextMenu: (e: React.MouseEvent) => {
+            e.preventDefault();
+            requestMenu(e.clientX, e.clientY);
+          },
+          onTouchStart: (e: React.TouchEvent) => {
+            const { clientX, clientY } = e.touches[0];
+            cancelLongPress();
+            longPressRef.current = setTimeout(() => {
+              longPressRef.current = null;
+              requestMenu(clientX, clientY);
+            }, 500);
+          },
+          onTouchEnd: cancelLongPress,
+          onTouchMove: cancelLongPress,
+          onTouchCancel: cancelLongPress,
+        }
+      : undefined;
 
   return (
     <div
@@ -784,15 +822,26 @@ const MessageRow = memo(function MessageRow({
               isDeleted={isDeleted}
             />
           )}
-          {fileCards.map((att) => (
-            <AttachmentFileCard
-              key={att.uploadId}
-              attachment={att}
-              roomId={roomId}
-              deleted={isDeleted(att.uploadId)}
-              onDelete={() => onDeleteAttachment(att.uploadId)}
-            />
-          ))}
+          {files.map((att) =>
+            // A deleted video falls back to the file card's "deleted" state.
+            isInlineVideo(att.mime) && !isDeleted(att.uploadId) ? (
+              <AttachmentVideo
+                key={att.uploadId}
+                attachment={att}
+                roomId={roomId}
+                onClick={() => onImageClick(att)}
+                onDelete={() => onDeleteAttachment(att.uploadId)}
+              />
+            ) : (
+              <AttachmentFileCard
+                key={att.uploadId}
+                attachment={att}
+                roomId={roomId}
+                deleted={isDeleted(att.uploadId)}
+                onDelete={() => onDeleteAttachment(att.uploadId)}
+              />
+            ),
+          )}
         </div>
       )}
 
@@ -829,15 +878,23 @@ const MessageRow = memo(function MessageRow({
   );
 });
 
+const MENU_ITEM = 'flex w-full items-center gap-2 px-3 py-2 text-left text-[14px] hover:bg-bg-2';
+
+// Lists only what applies: "download all" for a message with several live
+// attachments, "delete" for a confirmed own message.
 function MessageContextMenu({
   x,
   y,
+  downloadCount,
+  onDownloadAll,
   onDelete,
   onClose,
 }: {
   x: number;
   y: number;
-  onDelete: () => void;
+  downloadCount: number;
+  onDownloadAll: () => void;
+  onDelete?: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -856,7 +913,7 @@ function MessageContextMenu({
   }, [onClose]);
 
   const left = Math.min(x, window.innerWidth - 200);
-  const top = Math.min(y, window.innerHeight - 64);
+  const top = Math.min(y, window.innerHeight - 104);
 
   return (
     <>
@@ -873,14 +930,18 @@ function MessageContextMenu({
         className="fixed z-50 min-w-[180px] border border-line-strong bg-bg-3 py-1 shadow-lg"
         style={{ left, top }}
       >
-        <button
-          role="menuitem"
-          onClick={onDelete}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left text-[14px] text-danger hover:bg-bg-2"
-        >
-          <Trash2 size={15} />
-          Удалить
-        </button>
+        {downloadCount > 0 && (
+          <button role="menuitem" onClick={onDownloadAll} className={`${MENU_ITEM} text-body`}>
+            <Download size={15} />
+            Скачать все ({downloadCount})
+          </button>
+        )}
+        {onDelete && (
+          <button role="menuitem" onClick={onDelete} className={`${MENU_ITEM} text-danger`}>
+            <Trash2 size={15} />
+            Удалить
+          </button>
+        )}
       </div>
     </>
   );

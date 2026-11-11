@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Archive, Download, File, FileText, Music, Trash2, Video } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
-import { downloadAttachment } from '../hooks/useAttachmentUrl';
+import { useDownload } from '../hooks/useAttachmentUrl';
 
 type Props = {
   attachment: Attachment;
@@ -32,8 +32,7 @@ function fileIcon(mime: string): ReactNode {
 }
 
 export function AttachmentFileCard({ attachment, roomId, onDelete, deleted = false }: Props) {
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const download = useDownload([attachment], roomId);
 
   if (deleted) {
     return (
@@ -49,25 +48,12 @@ export function AttachmentFileCard({ attachment, roomId, onDelete, deleted = fal
     );
   }
 
-  async function handleDownload() {
-    if (busy) return;
-    setBusy(true);
-    setFailed(false);
-    try {
-      await downloadAttachment(attachment, roomId);
-    } catch {
-      setFailed(true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="flex w-full max-w-[320px] items-stretch border border-line bg-bg-2">
       <button
         type="button"
-        onClick={handleDownload}
-        disabled={busy}
+        onClick={download.start}
+        disabled={download.state === 'busy'}
         className="group/dl flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-bg-3 disabled:cursor-default disabled:opacity-60"
       >
         {fileIcon(attachment.mime)}
@@ -76,7 +62,7 @@ export function AttachmentFileCard({ attachment, roomId, onDelete, deleted = fal
             {attachment.name}
           </span>
           <span className="block text-[11px] text-muted-2 tabular-nums">
-            {failed ? 'Не удалось скачать' : formatFileSize(attachment.size)}
+            {download.state === 'failed' ? 'Не удалось скачать' : formatFileSize(attachment.size)}
           </span>
         </span>
         <span className="grid h-8 w-8 shrink-0 place-items-center border border-line text-muted-2 transition-colors group-hover/dl:border-accent group-hover/dl:text-accent">
