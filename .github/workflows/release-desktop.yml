@@ -151,6 +151,9 @@ jobs:
       - name: Prepare verified native WebRTC SDK
         run: python scripts/prepare-webrtc.py --platform windows-x86_64 --github-env "$env:GITHUB_ENV"
 
+      - name: Prepare verified fallback codecs
+        run: python scripts/prepare-decoder.py --github-env "$env:GITHUB_ENV"
+
       - name: Find DirectX shader compiler
         shell: pwsh
         run: |
@@ -175,6 +178,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           cargo build --locked --release --target $env:DESKTOP_TARGET
           cargo test --locked --release -p grid@0.18.0 --target $env:DESKTOP_TARGET
+          cargo build --locked --package voice-hub-release-sign --target $env:DESKTOP_TARGET
 
       - name: Sign GPUI update
         env:
@@ -184,7 +188,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $executable = "Voice-Hub-GPUI_${env:TAG}_windows-x86_64.exe"
           Copy-Item "src-gpui/target/$env:DESKTOP_TARGET/release/voice-hub-gpui-beta.exe" $executable
-          cargo run --locked --manifest-path src-gpui/Cargo.toml -p voice-hub-release-sign -- $executable
+          & "src-gpui/target/$env:DESKTOP_TARGET/debug/voice-hub-release-sign.exe" $executable
           $manifest = @{
             version = $env:TAG.TrimStart('v')
             notes = 'Voice Hub GPUI beta'
@@ -212,6 +216,10 @@ jobs:
           Copy-Item $executable gpui-beta/voice-hub-gpui-beta.exe
           Copy-Item "$executable.sig" gpui-beta/
           Copy-Item src-gpui/BETA.txt, LICENSE gpui-beta/
+          New-Item -ItemType Directory -Path gpui-beta/native | Out-Null
+          Copy-Item $env:APP_DECODER_ARCHIVE gpui-beta/native/
+          $decoder = Split-Path $env:APP_DECODER_ARCHIVE -Leaf
+          Copy-Item $env:APP_DECODER_ARCHIVE $decoder
           $metadata = cargo metadata --locked --format-version 1 --filter-platform $env:DESKTOP_TARGET --manifest-path src-gpui/Cargo.toml | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Cannot collect dependency license notices' }
           foreach ($package in $metadata.packages) {
@@ -237,7 +245,7 @@ jobs:
           Compress-Archive -Path gpui-beta/* -DestinationPath $archive
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $archive" | Set-Content -Encoding utf8NoBOM "$archive.sha256"
-          gh release upload "$env:TAG" $archive "$archive.sha256" $executable "$executable.sig" gpui-latest.json --repo "$env:REPO" --clobber
+          gh release upload "$env:TAG" $archive "$archive.sha256" $executable "$executable.sig" gpui-latest.json $decoder --repo "$env:REPO" --clobber
 
   publish-update-mirror:
     needs: [build-windows, build-gpui-beta]
@@ -269,6 +277,7 @@ jobs:
           gh release download "$TAG" --repo "$REPO" --dir mirror \
             --pattern 'latest.json' \
             --pattern 'gpui-latest.json' \
+            --pattern 'ffmpeg-*.zip' \
             --pattern '*.exe'
 
           installer=$(jq -r '.platforms["windows-x86_64"].url | split("/")[-1]' mirror/latest.json)

@@ -54,23 +54,86 @@ pub fn focused_binding(
 }
 pub fn key_name(key: &str) -> String {
     if key.len() == 1 && key.as_bytes()[0].is_ascii_alphabetic() {
-        format!("Key{}", key.to_ascii_uppercase())
-    } else if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
-        format!("Num{key}")
-    } else {
-        match key {
-            "enter" => "Return",
-            "escape" => "Escape",
-            "space" => "Space",
-            "backspace" => "Backspace",
-            "delete" => "Delete",
-            "up" => "UpArrow",
-            "down" => "DownArrow",
-            "left" => "LeftArrow",
-            "right" => "RightArrow",
-            "tab" => "Tab",
-            other => other,
-        }
-        .to_owned()
+        return format!("Key{}", key.to_ascii_uppercase());
+    }
+    if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
+        return format!("Num{key}");
+    }
+    if key
+        .strip_prefix('f')
+        .is_some_and(|n| n.parse::<u8>().is_ok_and(|n| (1..=12).contains(&n)))
+    {
+        return key.to_ascii_uppercase();
+    }
+    match key {
+        "enter" => "Return",
+        "escape" => "Escape",
+        "space" => "Space",
+        "backspace" => "Backspace",
+        "delete" => "Delete",
+        "up" => "UpArrow",
+        "down" => "DownArrow",
+        "left" => "LeftArrow",
+        "right" => "RightArrow",
+        "tab" => "Tab",
+        "home" => "Home",
+        "end" => "End",
+        "pageup" => "PageUp",
+        "pagedown" => "PageDown",
+        "insert" => "Insert",
+        "-" => "Minus",
+        "=" => "Equal",
+        "[" => "LeftBracket",
+        "]" => "RightBracket",
+        "\\" => "BackSlash",
+        ";" => "SemiColon",
+        "'" => "Quote",
+        "," => "Comma",
+        "." => "Dot",
+        "/" => "Slash",
+        "`" => "BackQuote",
+        "capslock" => "CapsLock",
+        "numlock" => "NumLock",
+        "scrolllock" => "ScrollLock",
+        "pause" => "Pause",
+        "printscreen" => "PrintScreen",
+        "numpad0" => "Kp0",
+        "numpad1" => "Kp1",
+        "numpad2" => "Kp2",
+        "numpad3" => "Kp3",
+        "numpad4" => "Kp4",
+        "numpad5" => "Kp5",
+        "numpad6" => "Kp6",
+        "numpad7" => "Kp7",
+        "numpad8" => "Kp8",
+        "numpad9" => "Kp9",
+        "numpadadd" => "KpPlus",
+        "numpadsubtract" => "KpMinus",
+        "numpadmultiply" => "KpMultiply",
+        "numpaddivide" => "KpDivide",
+        "numpadenter" => "KpReturn",
+        "numpaddecimal" => "KpDelete",
+        other => other,
+    }
+    .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn keyboard_names_match_focused_and_global_events() {
+        assert_eq!(key_name("m"), "KeyM");
+        assert_eq!(key_name("f8"), "F8");
+        assert_eq!(key_name("."), "Dot");
+        let binding = Hotkey::Keyboard {
+            key: "F8".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+            meta: false,
+        };
+        assert!(focused_binding(&binding, "f8", true, false, false, false));
+        assert!(!focused_binding(&binding, "f8", true, true, false, false));
     }
 }

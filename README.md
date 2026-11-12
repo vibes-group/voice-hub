@@ -24,11 +24,11 @@
 
 Сборка универсальная: адрес сервера вводится при первом запуске.
 
-В релизах также публикуется отдельный portable ZIP **GPUI Beta** для Windows.
-В бете доступны голосовые комнаты, список участников, mute/deafen. Нужны
-наушники, устройства по умолчанию с поддержкой 48 кГц и прямой UDP-доступ
-к серверу по IPv4. Эхоподавление, шумоподавление, чат, демонстрация экрана,
-TURN, трей и автообновление доступны в стабильном клиенте.
+В релизах также публикуется portable ZIP **GPUI Beta** для Windows x86_64:
+нативные голосовые комнаты с TURN, эхоподавлением и теми же RNNoise/FastEnhancer,
+чат и вложения, демонстрации экрана, настройки участников, администрирование,
+трей, глобальные клавиши и подписанные обновления с вашего сервера.
+Профиль GPUI хранится отдельно; сессия защищена Windows Credential Manager.
 
 ## Разработка
 
@@ -57,6 +57,9 @@ GPUI beta (`src-gpui/`), Windows с Visual Studio Build Tools и Windows SDK:
 
 ```bash
 python scripts/check-cargo-age.py src-gpui/Cargo.lock
+python scripts/prepare-webrtc.py --platform windows-x86_64 --github-env src-gpui/.native/build.env
+python scripts/prepare-decoder.py --github-env src-gpui/.native/build.env
+# Set LK_CUSTOM_WEBRTC and APP_DECODER_ARCHIVE from src-gpui/.native/build.env in your shell.
 cd src-gpui
 cargo run --locked
 ```

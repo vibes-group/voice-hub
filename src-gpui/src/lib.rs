@@ -3,6 +3,8 @@ pub mod audio;
 pub mod chat;
 #[cfg(feature = "desktop")]
 pub mod controller;
+#[cfg(feature = "desktop")]
+pub mod decoder;
 pub mod denoise;
 pub mod media;
 pub mod player;

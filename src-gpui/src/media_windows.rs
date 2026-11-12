@@ -95,6 +95,7 @@ pub struct Media {
     publisher: Option<Publishing>,
     subscribers: BTreeMap<String, Connection>,
     pub resume_token: Option<String>,
+    audio_failed: bool,
     last_devices: Instant,
 }
 impl Drop for Media {
@@ -109,6 +110,17 @@ impl Drop for Media {
 }
 
 impl Media {
+    pub fn take_audio_failed(&mut self) -> bool {
+        std::mem::take(&mut self.audio_failed)
+    }
+    pub fn voice_connected(&self) -> bool {
+        self.audio.pc.connection_state() == PeerConnectionState::Connected
+    }
+    pub fn screen_needs_ice_restart(&self) -> bool {
+        self.publisher
+            .as_ref()
+            .is_some_and(|p| p.connection.pc.connection_state() != PeerConnectionState::Connected)
+    }
     pub fn reset_audio(&mut self, config: &ServerConfig) -> Result<(), String> {
         self.config.ice_servers = config
             .ice_servers
@@ -130,6 +142,7 @@ impl Media {
             )
             .map_err(|_| "Не удалось восстановить микрофон")?;
         self.audio = audio;
+        self.audio_failed = false;
         if let Some(tasks) = self.tasks.remove("audio") {
             for task in tasks {
                 task.abort();
@@ -138,6 +151,19 @@ impl Media {
         self.slots.clear();
         self.mixer.clear();
         self.subscribers.clear();
+        let keys = self
+            .tasks
+            .keys()
+            .filter(|key| key.starts_with("screen-sub:"))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in keys {
+            if let Some(tasks) = self.tasks.remove(&key) {
+                for task in tasks {
+                    task.abort();
+                }
+            }
+        }
         Ok(())
     }
     pub fn new(
@@ -199,6 +225,7 @@ impl Media {
             publisher: None,
             subscribers: BTreeMap::new(),
             resume_token: None,
+            audio_failed: false,
             last_devices: Instant::now(),
         })
     }
@@ -305,21 +332,21 @@ impl Media {
                 )])
             }
             "answer" => {
-                if data["pc"] == "screen-pub" {
-                    if let Some(p) = &mut self.publisher {
-                        let sdp = data["sdp"].as_str().ok_or("Нет SDP")?;
-                        p.connection
-                            .pc
-                            .set_remote_description(
-                                SessionDescription::parse(sdp, SdpType::Answer)
-                                    .map_err(|_| "Некорректный SDP")?,
-                            )
-                            .await
-                            .map_err(|_| "Не удалось подключить демонстрацию")?;
-                        p.connection.remote_ready = true;
-                        flush_candidates(&mut p.connection).await;
-                        set_video_parameters(&p.sender, &self.settings.screen, true)?;
-                    }
+                if data["pc"] == "screen-pub"
+                    && let Some(p) = &mut self.publisher
+                {
+                    let sdp = data["sdp"].as_str().ok_or("Нет SDP")?;
+                    p.connection
+                        .pc
+                        .set_remote_description(
+                            SessionDescription::parse(sdp, SdpType::Answer)
+                                .map_err(|_| "Некорректный SDP")?,
+                        )
+                        .await
+                        .map_err(|_| "Не удалось подключить демонстрацию")?;
+                    p.connection.remote_ready = true;
+                    flush_candidates(&mut p.connection).await;
+                    set_video_parameters(&p.sender, &self.settings.screen, true)?;
                 }
                 Ok(vec![])
             }
@@ -524,12 +551,13 @@ impl Media {
                 Event::Signal(signal) => signals.push(signal),
                 Event::State(key, state) => {
                     if key == "audio" && state == PeerConnectionState::Failed {
-                        return Err("Голосовое соединение потеряно".into());
+                        self.audio_failed = true;
                     }
-                    if key == "screen-pub" && state == PeerConnectionState::Failed {
-                        if let Some(offer) = self.restart_screen_ice().await? {
-                            signals.push(offer);
-                        }
+                    if key == "screen-pub"
+                        && state == PeerConnectionState::Failed
+                        && let Some(offer) = self.restart_screen_ice().await?
+                    {
+                        signals.push(offer);
                     }
                 }
                 Event::CaptureEnded => {
@@ -583,6 +611,11 @@ impl Media {
                 *to = from as f32 / 32768.0;
             }
             self.denoiser.process(&mut captured)?;
+            let rms = (captured.iter().map(|s| s * s).sum::<f32>() / FRAME as f32).sqrt();
+            levels.push((
+                "self".into(),
+                !self.settings.muted && !self.settings.deafened && rms > 0.015,
+            ));
             for (to, from) in pcm.iter_mut().zip(captured) {
                 *to = if self.settings.muted || self.settings.deafened {
                     0
@@ -603,24 +636,24 @@ impl Media {
                     .map_err(|_| "Не удалось отправить звук микрофона")?;
             }
         }
-        if let Some(p) = &mut self.publisher {
-            if let (Some(loopback), Some(audio)) = (&mut p.loopback, &p.audio) {
-                while let Ok(samples) = loopback.captured.try_recv() {
-                    let pcm: Vec<i16> = samples
-                        .iter()
-                        .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
-                        .collect();
-                    for chunk in pcm.chunks(480) {
-                        audio
-                            .capture_frame(&AudioFrame {
-                                data: Cow::Borrowed(chunk),
-                                sample_rate: 48000,
-                                num_channels: 1,
-                                samples_per_channel: 480,
-                            })
-                            .await
-                            .map_err(|_| "Ошибка передачи системного звука")?;
-                    }
+        if let Some(p) = &mut self.publisher
+            && let (Some(loopback), Some(audio)) = (&mut p.loopback, &p.audio)
+        {
+            while let Ok(samples) = loopback.captured.try_recv() {
+                let pcm: Vec<i16> = samples
+                    .iter()
+                    .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+                    .collect();
+                for chunk in pcm.chunks(480) {
+                    audio
+                        .capture_frame(&AudioFrame {
+                            data: Cow::Borrowed(chunk),
+                            sample_rate: 48000,
+                            num_channels: 1,
+                            samples_per_channel: 480,
+                        })
+                        .await
+                        .map_err(|_| "Ошибка передачи системного звука")?;
                 }
             }
         }
@@ -658,7 +691,10 @@ impl Media {
         }
         if self.last_devices.elapsed() > Duration::from_secs(2) {
             self.last_devices = Instant::now();
-            if self.devices.failed.load(Ordering::Relaxed) {
+            if self.devices.failed.load(Ordering::Relaxed)
+                || crate::device::selected_ids(&self.settings.microphone, &self.settings.speaker)
+                    .is_some_and(|ids| ids != self.devices.ids)
+            {
                 self.devices = Devices::open_selected(
                     self.muted.clone(),
                     self.deafened.clone(),

@@ -73,6 +73,8 @@ pub struct ChatMessage {
     pub upload_progress: f32,
     #[serde(skip)]
     pub failed: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_files: Vec<std::path::PathBuf>,
 }
 
 pub const CHAT_MAX_BYTES: usize = 2000;

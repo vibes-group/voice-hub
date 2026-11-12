@@ -8,6 +8,7 @@ on:
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
       - 'scripts/prepare-webrtc.py'
+      - 'scripts/prepare-decoder.py'
       - '.github/workflows/release-desktop.yml'
   workflow_dispatch:
 

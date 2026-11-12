@@ -535,6 +535,10 @@ impl Client {
                             .to_owned(),
                     ))
                     .child(
+                        button("fullscreen-player", "Полный экран", false)
+                            .on_click(|_, window, _| window.toggle_fullscreen()),
+                    )
+                    .child(
                         button("close-player", "Закрыть видео", false).on_click(cx.listener(
                             |this, _, _, cx| {
                                 this.player = None;
@@ -544,24 +548,34 @@ impl Client {
                         )),
                     ),
             )
-            .child(
-                canvas(|_, _, _| (), {
-                    let entity = cx.entity();
-                    move |bounds, _, window, cx| {
-                        if let Some(player) = &entity.read(cx).player {
-                            let factor = window.scale_factor();
-                            player.place(
-                                (f32::from(bounds.origin.x) * factor) as i32,
-                                (f32::from(bounds.origin.y) * factor) as i32,
-                                (f32::from(bounds.size.width) * factor) as i32,
-                                (f32::from(bounds.size.height) * factor) as i32,
-                            );
+            .when_some(self.player_frame.clone(), |view, frame| {
+                view.child(
+                    img(frame)
+                        .w_full()
+                        .h(px(320.0))
+                        .object_fit(ObjectFit::Contain),
+                )
+            })
+            .when(self.player_frame.is_none(), |view| {
+                view.child(
+                    canvas(|_, _, _| (), {
+                        let entity = cx.entity();
+                        move |bounds, _, window, cx| {
+                            if let Some(player) = &entity.read(cx).player {
+                                let factor = window.scale_factor();
+                                player.place(
+                                    (f32::from(bounds.origin.x) * factor) as i32,
+                                    (f32::from(bounds.origin.y) * factor) as i32,
+                                    (f32::from(bounds.size.width) * factor) as i32,
+                                    (f32::from(bounds.size.height) * factor) as i32,
+                                );
+                            }
                         }
-                    }
-                })
-                .w_full()
-                .h(px(320.0)),
-            )
+                    })
+                    .w_full()
+                    .h(px(320.0)),
+                )
+            })
             .child(
                 row()
                     .child(
@@ -633,7 +647,7 @@ impl Client {
                         .when(History::may_delete(message,&self.state.settings.client_id,self.state.role=="admin"),|v|v.child(button(format!("delete:{}",message.id),"Удалить сообщение",false).on_click(cx.listener(move|this,_,_,_|this.act(Action::DeleteMessage(delete_id.clone())))))))
             }))
             .child(card().child(self.compose.clone()).children(self.files.iter().enumerate().map(|(index,path)|row().child(hint(path.file_name().and_then(|p|p.to_str()).unwrap_or("file").to_owned())).child(button(format!("remove-pending:{index}"),"×",false).on_click(cx.listener(move|this,_,_,cx|{if index<this.files.len(){this.files.remove(index);}cx.notify();})))))
-                .child(row().child(button("attach","Прикрепить",false).on_click(cx.listener(|this,_,_,cx|this.pick_files(cx)))).child(button("send","Отправить",true).on_click(cx.listener(|this,_,_,cx|this.send_chat(cx))))).child(hint("Enter — отправить · Ctrl+V — вставить изображение · файлы можно перетащить в окно")))
+                .child(row().child(button("attach","Прикрепить",false).on_click(cx.listener(|this,_,_,cx|this.pick_files(cx)))).child(button("send","Отправить",true).on_click(cx.listener(|this,_,_,cx|this.send_chat(cx))))).child(hint("Enter — отправить · Shift+Enter — новая строка · Ctrl+V — вставить изображение · файлы можно перетащить в окно")))
     }
     fn screen_view(&self, cx: &mut Context<Self>) -> Div {
         column()
@@ -1356,6 +1370,7 @@ impl Render for Client {
                         .child(
                             div()
                                 .id("content")
+                                .track_scroll(&self.scroll)
                                 .flex_1()
                                 .min_w_0()
                                 .overflow_y_scroll()

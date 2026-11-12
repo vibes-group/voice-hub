@@ -51,6 +51,7 @@ struct Client {
     player_position: f64,
     player_duration: f64,
     player_paused: bool,
+    player_frame: Option<Arc<RenderImage>>,
     storage: Storage,
     state: Snapshot,
     server: Entity<Input>,
@@ -77,6 +78,7 @@ struct Client {
     passwords: Vec<PasswordEntry>,
     created_password: Option<CreatedPassword>,
     history_count: usize,
+    scroll: ScrollHandle,
     last_toggle: Instant,
     confirm: Option<String>,
     _tasks: Vec<Task<()>>,
@@ -157,7 +159,7 @@ impl Client {
         let server = cx.new(|cx| Input::new(&settings.server, false, cx));
         let name = cx.new(|cx| Input::new(&settings.name, false, cx));
         let password = cx.new(|cx| Input::new("", true, cx));
-        let compose = cx.new(|cx| Input::new("", false, cx));
+        let compose = cx.new(|cx| Input::new("", false, cx).multiline());
         let subscriptions = vec![
             cx.observe_window_activation(window, |this, window, _| {
                 if window.is_window_active() {
@@ -205,6 +207,7 @@ impl Client {
             player_position: 0.0,
             player_duration: 0.0,
             player_paused: true,
+            player_frame: None,
             storage,
             state,
             server,
@@ -231,6 +234,7 @@ impl Client {
             passwords: vec![],
             created_password: None,
             history_count: 50,
+            scroll: ScrollHandle::new(),
             last_toggle: Instant::now() - Duration::from_secs(1),
             confirm: None,
             _tasks: tasks,
@@ -257,7 +261,14 @@ impl Client {
             Update::Snapshot(snapshot) => {
                 let old_room = self.state.settings.room.clone();
                 let old_server = self.state.settings.server.clone();
+                let was_bottom =
+                    self.scroll.max_offset().height + self.scroll.offset().y < px(80.0);
+                let new_message = self.state.messages.last().map(|m| &m.id)
+                    != snapshot.messages.last().map(|m| &m.id);
                 self.state = *snapshot;
+                if self.panel == Panel::Chat && was_bottom && new_message {
+                    self.scroll.scroll_to_bottom();
+                }
                 if old_server != self.state.settings.server {
                     self.update_ready = None;
                     self.update_available = false;
@@ -276,6 +287,7 @@ impl Client {
                     self.player = None;
                     self.playing = None;
                     self.history_count = 50;
+                    self.scroll.scroll_to_bottom();
                 }
                 self.video.retain(|id, _| {
                     if id == "self" {
@@ -301,6 +313,11 @@ impl Client {
             }
             Update::Levels(levels) => {
                 for (id, speaking) in levels {
+                    let id = if id == "self" {
+                        self.state.self_id.clone()
+                    } else {
+                        id
+                    };
                     self.speaking.insert(id, (speaking, Instant::now()));
                 }
             }
@@ -329,13 +346,21 @@ impl Client {
                     && self.player.is_none()
                 {
                     if let Some(path) = &path {
-                        match Player::open(path) {
+                        match Player::open(path, &self.state.settings.server) {
                             Ok((player, mut events)) => {
                                 self.player = Some(player);
+                                let expected_id = attachment.upload_id.clone();
                                 cx.spawn(async move |entity, cx| {
                                     while let Some(event) = events.recv().await {
                                         if entity
                                             .update(cx, |this, cx| {
+                                                if this
+                                                    .playing
+                                                    .as_ref()
+                                                    .is_none_or(|a| a.upload_id != expected_id)
+                                                {
+                                                    return;
+                                                }
                                                 match event {
                                                     PlayerEvent::Status {
                                                         position,
@@ -345,6 +370,23 @@ impl Client {
                                                         this.player_position = position;
                                                         this.player_duration = duration;
                                                         this.player_paused = paused;
+                                                    }
+                                                    PlayerEvent::Frame(frame) => {
+                                                        if let Some(buffer) =
+                                                            image::RgbaImage::from_raw(
+                                                                frame.width,
+                                                                frame.height,
+                                                                (*frame.bgra).clone(),
+                                                            )
+                                                        {
+                                                            this.player_frame =
+                                                                Some(Arc::new(RenderImage::new(
+                                                                    vec![image::Frame::new(buffer)],
+                                                                )));
+                                                            if let Some(player) = &this.player {
+                                                                player.hide();
+                                                            }
+                                                        }
                                                     }
                                                     PlayerEvent::Error(error) => {
                                                         this.error = Some(error)
@@ -453,6 +495,8 @@ impl Client {
         if self.capturing_hotkey {
             if key.key == "escape" {
                 self.capturing_hotkey = false;
+                self.system
+                    .configure(self.state.settings.hotkey.clone(), false, false);
             } else {
                 let binding = Hotkey::Keyboard {
                     key: voice_hub_gpui_beta::system::key_name(&key.key),
@@ -614,6 +658,7 @@ impl Client {
     fn open_video(&mut self, attachment: Attachment, cx: &mut Context<Self>) {
         self.player = None;
         self.playing = Some(attachment.clone());
+        self.player_frame = None;
         self.act(Action::Download {
             attachment,
             destination: None,

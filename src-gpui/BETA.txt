@@ -1,22 +1,27 @@
 Voice Hub - GPUI Beta (Windows x86_64)
 
-Extract the ZIP and run voice-hub-gpui-beta.exe. Enter your server's HTTPS
-address, display name and server password, then select a room and connect.
-The microphone starts muted. Click the microphone button to speak.
+Extract the entire ZIP, including native/ and licenses/, and run
+voice-hub-gpui-beta.exe. Enter your HTTPS server, name and password.
+Chat is available before joining voice. Closing the window keeps the
+application in the tray; use Exit in the tray menu to quit.
 
-This build runs separately from the stable desktop client. It uses native
-GPUI rendering and native Opus audio, without a WebView.
+Voice: selectable devices, mute/deafen, echo cancellation, automatic gain,
+RNNoise, FastEnhancer Tiny/Base, WebRTC noise suppression and TURN relay.
+Screen sharing: screens/windows, system audio, AV1/VP9, quality settings,
+multiple viewers, focused view and reconnect/resume.
+Chat: persistent history, attachments, images, video playback, downloads,
+retry/cancel, local file deletion and message deletion.
+Desktop: participant preferences, pings, administration, global keyboard
+and mouse bindings, autostart, tray and signed automatic updates.
 
-Supported: voice rooms, participant list, mute and deafen; default input and
-output devices supporting 48 kHz, mono/stereo f32/i16/u16. IPv4 and direct UDP
-access to the server are required. HTTP is allowed only on loopback for local
-development. Passwords and session cookies are held in memory only.
+Settings and history use a separate GPUI profile. Session credentials are
+stored in Windows Credential Manager; connection passwords are never saved.
+Updates come from your own server at /desktop/gpui-latest.json.
 
-Use headphones: this beta has no acoustic echo cancellation or noise
-suppression. Screen sharing, chat, device selection, TURN relay, automatic
-reconnection, tray, global hotkeys and automatic updates are not included.
-Closing the window ends the call. After a network or device error, reconnect.
+The native/ archive contains the pinned LGPL FFmpeg fallback decoder and
+its license notices. It is verified before extraction or execution. The
+server mirror also provides this archive for standalone EXE installations.
 
-For comparisons, use the same room and devices, with noise suppression off
-in the stable client. Measure the entire process tree, both idle and in a
-call. This preview has no measured performance advantage yet.
+This is a beta. Audio hardware, capture permissions, graphics drivers and
+real calls still require testing on the target Windows machines. A performance
+improvement over the stable client has not been established by measurement.

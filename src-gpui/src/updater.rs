@@ -148,7 +148,10 @@ async fn download(
         .map_err(|_| "Некорректный адрес обновления")?;
     if url.origin() != server.origin()
         || !url.path().starts_with("/desktop/files/")
-        || url.path_segments().and_then(|segments| segments.last()) != Some(filename.as_str())
+        || url
+            .path_segments()
+            .and_then(|mut segments| segments.next_back())
+            != Some(filename.as_str())
     {
         return Err("Обновление должно загружаться с вашего сервера".into());
     }

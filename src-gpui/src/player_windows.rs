@@ -10,12 +10,12 @@ use windows::{
 
 #[implement(IMFMediaEngineNotify)]
 struct Notify {
-    events: tokio::sync::mpsc::Sender<PlayerEvent>,
+    actions: mpsc::Sender<PlayerAction>,
 }
 impl IMFMediaEngineNotify_Impl for Notify_Impl {
     fn EventNotify(&self, event: u32, _: usize, _: u32) -> windows::core::Result<()> {
         if event == MF_MEDIA_ENGINE_EVENT_ERROR.0 as u32 {
-            let _=self.events.try_send(PlayerEvent::Error("Windows не смог воспроизвести видео. Проверьте наличие системного кодека для этого формата".into()));
+            let _ = self.actions.send(PlayerAction::Fallback);
         }
         Ok(())
     }
@@ -33,7 +33,10 @@ impl Drop for Player {
     }
 }
 impl Player {
-    pub fn open(path: &Path) -> Result<(Self, tokio::sync::mpsc::Receiver<PlayerEvent>), String> {
+    pub fn open(
+        path: &Path,
+        server: &str,
+    ) -> Result<(Self, tokio::sync::mpsc::Receiver<PlayerEvent>), String> {
         unsafe {
             let parent = FindWindowW(None, w!("Voice Hub — GPUI"))
                 .map_err(|_| "Не найдено окно приложения")?;
@@ -56,8 +59,10 @@ impl Player {
             let (events, event_rx) = tokio::sync::mpsc::channel(8);
             let hwnd = child.0 as isize;
             let path = path.to_owned();
+            let server = server.to_owned();
+            let callback_actions = actions.clone();
             std::thread::spawn(move || {
-                if run(path, hwnd, rx, events.clone()).is_err() {
+                if run(path, server, hwnd, rx, callback_actions, events.clone()).is_err() {
                     let _ = events.blocking_send(PlayerEvent::Error(
                         "Не удалось запустить системный видеоплеер".into(),
                     ));
@@ -91,13 +96,22 @@ impl Player {
 }
 fn run(
     path: std::path::PathBuf,
+    server: String,
     child: isize,
     rx: mpsc::Receiver<PlayerAction>,
+    callback_actions: mpsc::Sender<PlayerAction>,
     events: tokio::sync::mpsc::Sender<PlayerEvent>,
 ) -> windows::core::Result<()> {
     unsafe {
         CoInitializeEx(None, COINIT_MULTITHREADED).ok()?;
-        MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
+        if MFStartup(MF_VERSION, MFSTARTUP_FULL).is_err() {
+            CoUninitialize();
+            if let Err(error) = crate::decoder::run(path, server, rx, events.clone()) {
+                let _ = events.blocking_send(PlayerEvent::Error(error));
+            }
+            return Ok(());
+        }
+        let mut fallback = false;
         let result = (|| -> windows::core::Result<()> {
             let factory: IMFMediaEngineClassFactory =
                 CoCreateInstance(&CLSID_MFMediaEngineClassFactory, None, CLSCTX_INPROC_SERVER)?;
@@ -105,14 +119,14 @@ fn run(
             MFCreateAttributes(&mut attributes, 3)?;
             let attributes = attributes.expect("MFCreateAttributes");
             let notify: IMFMediaEngineNotify = Notify {
-                events: events.clone(),
+                actions: callback_actions,
             }
             .into();
             attributes.SetUnknown(&MF_MEDIA_ENGINE_CALLBACK, &notify)?;
             attributes.SetUINT64(&MF_MEDIA_ENGINE_PLAYBACK_HWND, child as u64)?;
             let engine = factory.CreateInstance(0, &attributes)?;
             let extension: IMFMediaEngineEx = engine.cast()?;
-            let source = url::Url::from_file_path(path)
+            let source = url::Url::from_file_path(&path)
                 .map_err(|_| windows::core::Error::from(E_INVALIDARG))?;
             engine.SetSource(&BSTR::from(source.as_str()))?;
             engine.SetAutoPlay(true)?;
@@ -143,6 +157,10 @@ fn run(
                         };
                         extension.UpdateVideoStream(None, Some(&rect), None)?;
                     }
+                    Ok(PlayerAction::Fallback) => {
+                        fallback = true;
+                        break;
+                    }
                     Ok(PlayerAction::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
                 }
@@ -159,6 +177,14 @@ fn run(
         })();
         let _ = MFShutdown();
         CoUninitialize();
-        result
+        if fallback || result.is_err() {
+            let _ = ShowWindow(HWND(child as *mut _), SW_HIDE);
+            if let Err(error) = crate::decoder::run(path, server, rx, events.clone()) {
+                let _ = events.blocking_send(PlayerEvent::Error(error));
+            }
+            Ok(())
+        } else {
+            result
+        }
     }
 }

@@ -16,6 +16,7 @@ pub struct Devices {
     pub captured: mpsc::Receiver<[f32; FRAME]>,
     pub playback: Playback,
     pub failed: Arc<AtomicBool>,
+    pub ids: (String, String),
 }
 
 impl Devices {
@@ -33,6 +34,10 @@ impl Devices {
         let input = selected(&host, mic, true).ok_or("Микрофон не найден")?;
         let output =
             selected(&host, speaker, false).ok_or("Устройство воспроизведения не найдено")?;
+        let ids = (
+            input.id().map_err(|_| "Микрофон отключён")?.to_string(),
+            output.id().map_err(|_| "Аудиовыход отключён")?.to_string(),
+        );
         let input_config = input
             .default_input_config()
             .map_err(|_| "Не удалось прочитать параметры микрофона")?;
@@ -90,8 +95,17 @@ impl Devices {
             captured,
             playback,
             failed,
+            ids,
         })
     }
+}
+
+pub fn selected_ids(mic: &str, speaker: &str) -> Option<(String, String)> {
+    let host = cpal::default_host();
+    Some((
+        selected(&host, mic, true)?.id().ok()?.to_string(),
+        selected(&host, speaker, false)?.id().ok()?.to_string(),
+    ))
 }
 
 fn capture<T>(
@@ -356,4 +370,40 @@ pub fn feedback(speaker: String, kind: Feedback) {
             std::thread::sleep(std::time::Duration::from_secs_f32(duration + 0.05));
         }
     });
+}
+
+pub struct AudioOutput {
+    _stream: cpal::Stream,
+    pub playback: Playback,
+}
+impl AudioOutput {
+    pub fn open(speaker: &str) -> Result<Self, String> {
+        let host = cpal::default_host();
+        let device = selected(&host, speaker, false).ok_or("Не найден аудиовыход")?;
+        let config = device
+            .default_output_config()
+            .map_err(|_| "Не удалось прочитать параметры аудиовыхода")?;
+        let playback = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER)));
+        let deafened = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(AtomicBool::new(false));
+        macro_rules! stream {
+            ($ty:ty) => {
+                play::<$ty>(&device, config.config(), playback.clone(), deafened, failed)
+            };
+        }
+        let stream = match config.sample_format() {
+            SampleFormat::F32 => stream!(f32),
+            SampleFormat::I16 => stream!(i16),
+            SampleFormat::I32 => stream!(i32),
+            SampleFormat::U16 => stream!(u16),
+            _ => return Err("Неподдерживаемый формат аудиовыхода".into()),
+        }?;
+        stream
+            .play()
+            .map_err(|_| "Не удалось запустить звук видео")?;
+        Ok(Self {
+            _stream: stream,
+            playback,
+        })
+    }
 }

@@ -19,6 +19,7 @@ pub struct History {
     pub messages: Vec<ChatMessage>,
     storage: Storage,
     name: String,
+    server: String,
 }
 
 impl History {
@@ -29,16 +30,32 @@ impl History {
             messages,
             storage,
             name,
+            server: server.into(),
         };
         history.prune(now_ms());
         history.save()?;
         Ok(history)
     }
     pub fn prune(&mut self, now: u64) {
+        let before = self
+            .messages
+            .iter()
+            .flat_map(|m| m.attachments.iter().map(|a| a.upload_id.clone()))
+            .collect::<BTreeSet<_>>();
         self.messages
             .retain(|m| m.ts >= now.saturating_sub(HISTORY_TTL_MS));
         if self.messages.len() > HISTORY_CAP {
             self.messages.drain(..self.messages.len() - HISTORY_CAP);
+        }
+        let kept = self
+            .messages
+            .iter()
+            .flat_map(|m| m.attachments.iter().map(|a| a.upload_id.clone()))
+            .collect::<BTreeSet<_>>();
+        if let Ok(cache) = BlobCache::new(&self.storage, &self.server) {
+            for id in before.difference(&kept) {
+                let _ = cache.delete(id);
+            }
         }
     }
     pub fn save(&mut self) -> Result<(), String> {

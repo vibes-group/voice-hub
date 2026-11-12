@@ -14,8 +14,8 @@ pub struct VideoImage {
     pub bgra: Arc<Vec<u8>>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "desktop"))]
 #[path = "media_windows.rs"]
 mod platform;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "desktop"))]
 pub use platform::*;

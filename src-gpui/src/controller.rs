@@ -112,8 +112,8 @@ enum Job {
         id: String,
         result: Result<Vec<Attachment>, String>,
     },
-    File(Attachment, Result<Option<PathBuf>, String>),
-    Admin(Result<AdminResult, String>),
+    File(Scope, Attachment, Result<Option<PathBuf>, String>),
+    Admin(Scope, Result<AdminResult, String>),
 }
 enum AdminResult {
     Entries(Vec<PasswordEntry>),
@@ -191,6 +191,7 @@ struct Worker {
     presence_stop: CancellationToken,
     uploads: BTreeMap<String, Upload>,
     pings: PingLimiter,
+    levels: BTreeMap<String, (bool, std::time::Instant)>,
     reconnect: usize,
     reconnect_at: tokio::time::Instant,
 }
@@ -232,6 +233,7 @@ impl Worker {
             presence_stop: CancellationToken::new(),
             uploads: BTreeMap::new(),
             pings: PingLimiter::default(),
+            levels: BTreeMap::new(),
             reconnect: 0,
             reconnect_at: tokio::time::Instant::now(),
         }
@@ -285,15 +287,26 @@ impl Worker {
                 },
                 _=tokio::time::sleep_until(self.reconnect_at),if self.api.is_some()&&self.socket.is_none()=>{
                     let result=tokio::select!{_=stop.cancelled()=>break,result=self.open_socket()=>result};
-                    if let Err(e)=result{self.error(e).await;self.disconnected();}self.emit().await;
+                    if let Err(e)=result{let expired=e.starts_with("Сессия истекла");self.error(e).await;if expired{self.clear().await;}else{self.disconnected();}}self.emit().await;
                 },
                 _=tick.tick(),if self.media.is_some()=>{
-                    if let Some(media)=&mut self.media{match media.tick().await{
-                        Ok((signals,levels))=>{for signal in signals{let _=self.send(signal).await;}if !levels.is_empty(){let _=self.tx.try_send(Update::Levels(levels));}},
+                    let result=self.media.as_mut().expect("media").tick().await;
+                    match result{
+                        Ok((signals,levels))=>{
+                            for signal in signals{let _=self.send(signal).await;}
+                            let now=std::time::Instant::now();let mut changed=Vec::new();
+                            for(id,active)in levels{let notify=self.levels.get(&id).is_none_or(|(previous,at)|*previous!=active||(active&&at.elapsed()>Duration::from_millis(150)));if notify{changed.push((id.clone(),active));self.levels.insert(id,(active,now));}}
+                            for(id,(active,at))in &mut self.levels{if *active&&at.elapsed()>Duration::from_millis(300){*active=false;changed.push((id.clone(),false));}}
+                            if !changed.is_empty(){let _=self.tx.try_send(Update::Levels(changed));}
+                            let media=self.media.as_mut().expect("media");let failed=media.take_audio_failed();let publishing=media.is_publishing();let ready=media.voice_connected();
+                            if failed{self.disconnected();self.emit().await;}
+                            else if publishing!=self.state.publishing||(self.state.connected&&self.state.settings.voice_active&&ready&&self.state.status!="Голос подключён"){if ready&&self.state.connected{self.state.status="Голос подключён".into();}self.emit().await;}
+                        },
                         Err(e)=>{self.error(e).await;self.media=None;self.disconnected();self.emit().await;}
-                    }}
+                    }
                 },
-                Some(job)=self.results.recv()=>{if let Err(e)=self.job(job).await{self.error(e).await;}self.emit().await;},
+                Some(job)=self.results.recv()=>{let progress_only=matches!(&job,Job::UploadProgress{..});if let Err(e)=self.job(job).await{self.error(e).await;}
+                if !progress_only{self.emit().await;}},
                 Some((event,data))=self.presence_events.recv()=>{self.presence_event(&event,data);self.emit().await;},
                 _=versions.tick(),if self.api.is_some()=>{if let Some(api)=&self.api&& let Ok(version)=api.version().await{self.state.version=version;self.emit().await;}},
             }
@@ -339,6 +352,18 @@ impl Worker {
             &self.state.settings.server,
             &self.state.settings.room,
         )?);
+        if let Some(history) = &mut self.history {
+            for message in &mut history.messages {
+                if message.pending
+                    && message
+                        .attachments
+                        .iter()
+                        .any(|a| a.upload_id.starts_with("temp:"))
+                {
+                    message.failed = true;
+                }
+            }
+        }
         Ok(())
     }
     async fn close_socket(&mut self) {
@@ -504,7 +529,17 @@ impl Worker {
                         })
                         .ok_or("Сообщение не найдено")?;
                     message.failed = false;
-                    self.send_pending().await?;
+                    if !message.local_files.is_empty()
+                        && message
+                            .attachments
+                            .iter()
+                            .any(|a| a.upload_id.starts_with("temp:"))
+                    {
+                        let files = message.local_files.clone();
+                        self.start_upload(id, files)?;
+                    } else {
+                        self.send_pending().await?;
+                    }
                 }
                 Ok(())
             }
@@ -568,7 +603,7 @@ impl Worker {
                         Ok(path)
                     }
                     .await;
-                    let _ = jobs.send(Job::File(attachment, result)).await;
+                    let _ = jobs.send(Job::File(scope, attachment, result)).await;
                 });
                 Ok(())
             }
@@ -623,12 +658,15 @@ impl Worker {
     async fn clear(&mut self) {
         self.close_socket().await;
         self.presence_stop.cancel();
+        while self.presence_events.try_recv().is_ok() {}
         self.media = None;
         self.api = None;
         for upload in self.uploads.values() {
             upload.cancel.cancel();
         }
         self.uploads.clear();
+        self.state.settings.voice_active = false;
+        let _ = self.state.settings.save(&self.storage);
         self.state.authenticated = false;
         self.state.connected = false;
         self.state.role.clear();
@@ -662,7 +700,7 @@ impl Worker {
                 self.state.connected = true;
                 self.reconnect = 0;
                 self.state.status = if self.state.settings.voice_active {
-                    "Голос подключён"
+                    "Голос подключается…"
                 } else {
                     "В чате"
                 }
@@ -678,6 +716,19 @@ impl Worker {
                         json!({"sessionToken":token}),
                     ))
                     .await?;
+                }
+                if let Some(media) = &mut self.media
+                    && media.screen_needs_ice_restart()
+                    && let Some(signal) = media.restart_screen_ice().await?
+                {
+                    self.send(signal).await?;
+                }
+                let watching = self.state.watching.iter().cloned().collect::<Vec<_>>();
+                for id in watching {
+                    if let Some(media) = &mut self.media {
+                        let signal = media.subscribe(&id, 2)?;
+                        self.send(signal).await?;
+                    }
                 }
                 self.send_pending().await?;
             }
@@ -805,6 +856,10 @@ impl Worker {
             self.state.settings.name.clone(),
             self.state.settings.client_id.clone(),
         )?;
+        if let Some(message) = history.messages.iter_mut().find(|m| m.client_msg_id == id) {
+            message.local_files = files.clone();
+        }
+        history.save()?;
         if files.is_empty() {
             self.send_pending().await
         } else {
@@ -918,7 +973,11 @@ impl Worker {
                     }
                 }
             }
-            Job::File(attachment, result) => {
+            Job::File(scope, attachment, result) => {
+                if scope != self.scope() {
+                    return Ok(());
+                }
+                self.trim_cache()?;
                 let _ = self
                     .tx
                     .send(Update::File {
@@ -928,7 +987,10 @@ impl Worker {
                     .await;
                 Ok(())
             }
-            Job::Admin(result) => {
+            Job::Admin(scope, result) => {
+                if scope.server != self.state.settings.server || self.state.role != "admin" {
+                    return Ok(());
+                }
                 match result? {
                     AdminResult::Entries(entries) => {
                         let _ = self.tx.send(Update::Passwords(entries)).await;
@@ -943,12 +1005,33 @@ impl Worker {
             }
         }
     }
+    fn trim_cache(&mut self) -> Result<(), String> {
+        let cache = BlobCache::new(&self.storage, &self.state.settings.server)?;
+        let removed = cache.trim()?;
+        if removed.is_empty() {
+            return Ok(());
+        }
+        if let Some(history) = &mut self.history {
+            history.mark_deleted(&removed);
+            history.save()?;
+        }
+        for room in ["room1", "room2", "room3"] {
+            if room != self.state.settings.room {
+                let mut history =
+                    History::load(self.storage.clone(), &self.state.settings.server, room)?;
+                history.mark_deleted(&removed);
+                history.save()?;
+            }
+        }
+        Ok(())
+    }
     fn admin(&mut self, action: AdminAction) -> Result<(), String> {
         if self.state.role != "admin" {
             return Err("Доступно администратору".into());
         }
         let api = self.api.clone().ok_or("Войдите на сервер")?;
         let jobs = self.jobs.clone();
+        let scope = self.scope();
         tokio::spawn(async move {
             let result = async {
                 match action {
@@ -980,7 +1063,7 @@ impl Worker {
                 }
             }
             .await;
-            let _ = jobs.send(Job::Admin(result)).await;
+            let _ = jobs.send(Job::Admin(scope, result)).await;
         });
         Ok(())
     }
@@ -1035,6 +1118,18 @@ mod unsupported {
             _: mpsc::Sender<VideoImage>,
         ) -> Result<Self, String> {
             Err("Нативный WebRTC включён в сборке Windows".into())
+        }
+        pub fn take_audio_failed(&mut self) -> bool {
+            false
+        }
+        pub fn voice_connected(&self) -> bool {
+            false
+        }
+        pub fn screen_needs_ice_restart(&self) -> bool {
+            false
+        }
+        pub async fn restart_screen_ice(&mut self) -> Result<Option<String>, String> {
+            Ok(None)
         }
         pub fn reset_audio(&mut self, _: &ServerConfig) -> Result<(), String> {
             Ok(())

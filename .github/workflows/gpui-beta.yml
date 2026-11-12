@@ -6,6 +6,7 @@ on:
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
       - 'scripts/prepare-webrtc.py'
+      - 'scripts/prepare-decoder.py'
       - 'backend/src/sfu/testdata/**'
       - '.github/workflows/gpui-beta.yml'
   pull_request:
@@ -13,6 +14,7 @@ on:
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
       - 'scripts/prepare-webrtc.py'
+      - 'scripts/prepare-decoder.py'
       - 'backend/src/sfu/testdata/**'
       - '.github/workflows/gpui-beta.yml'
   workflow_dispatch:
@@ -35,6 +37,8 @@ jobs:
         run: python scripts/check-cargo-age.py src-gpui/Cargo.lock
       - name: Prepare verified native WebRTC SDK
         run: python scripts/prepare-webrtc.py --platform windows-x86_64 --github-env "$env:GITHUB_ENV"
+      - name: Prepare verified fallback codecs
+        run: python scripts/prepare-decoder.py --github-env "$env:GITHUB_ENV"
       # CI caches never enter the signing/release job.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:

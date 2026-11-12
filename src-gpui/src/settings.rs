@@ -300,12 +300,38 @@ impl Storage {
             file.write_all(&data)
                 .and_then(|_| file.sync_all())
                 .map_err(|_| "Не удалось записать данные")?;
-            // Windows rename does not replace an existing file.
+            drop(file);
             #[cfg(target_os = "windows")]
-            if self.root.join(name).exists() {
-                std::fs::remove_file(self.root.join(name))
-                    .map_err(|_| "Не удалось обновить данные")?;
+            {
+                use std::os::windows::ffi::OsStrExt;
+                use windows::{
+                    Win32::Storage::FileSystem::{
+                        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+                    },
+                    core::PCWSTR,
+                };
+                let source = temp
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(Some(0))
+                    .collect::<Vec<_>>();
+                let target = self
+                    .root
+                    .join(name)
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(Some(0))
+                    .collect::<Vec<_>>();
+                unsafe {
+                    MoveFileExW(
+                        PCWSTR(source.as_ptr()),
+                        PCWSTR(target.as_ptr()),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                    )
+                }
+                .map_err(|_| "Не удалось обновить данные")
             }
+            #[cfg(not(target_os = "windows"))]
             std::fs::rename(&temp, self.root.join(name)).map_err(|_| "Не удалось обновить данные")
         })();
         if result.is_err() {

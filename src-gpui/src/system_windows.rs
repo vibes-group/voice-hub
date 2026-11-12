@@ -19,12 +19,15 @@ const CLASS: PCWSTR = w!("VoiceHubGpuiTray");
 const TITLE: PCWSTR = w!("Voice Hub — GPUI");
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_SHOW: u32 = WM_APP + 2;
+const WM_FLASH: u32 = WM_APP + 3;
+static TRAY_LIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static EVENTS: OnceLock<mpsc::Sender<SystemEvent>> = OnceLock::new();
 struct Listener {
     binding: Option<Hotkey>,
     capturing: bool,
     pressed: HashSet<Key>,
     last: Option<Instant>,
+    capture_modifiers: Option<Hotkey>,
 }
 pub struct System {
     mutex: HANDLE,
@@ -65,6 +68,7 @@ impl System {
                 capturing: false,
                 pressed: HashSet::new(),
                 last: None,
+                capture_modifiers: None,
             }));
             let shared = listener.clone();
             std::thread::spawn(move || {
@@ -95,6 +99,15 @@ impl System {
                                     | Key::MetaLeft
                                     | Key::MetaRight
                             );
+                            if state.capturing && modifier {
+                                state.capture_modifiers = Some(Hotkey::Keyboard {
+                                    key: String::new(),
+                                    ctrl,
+                                    shift,
+                                    alt,
+                                    meta,
+                                });
+                            }
                             if state.capturing && !modifier {
                                 let binding = Hotkey::Keyboard {
                                     key: name.clone(),
@@ -108,14 +121,22 @@ impl System {
                                 state.last = Some(Instant::now());
                                 emit(SystemEvent::Captured(binding));
                             } else if !state.capturing
-                                && !modifier
-                                && matches!(&state.binding,Some(Hotkey::Keyboard{key,ctrl:c,shift:s,alt:a,meta:m})if key==&name&&*c==ctrl&&*s==shift&&*a==alt&&*m==meta)
+                                && matches!(&state.binding,Some(Hotkey::Keyboard{key,ctrl:c,shift:s,alt:a,meta:m})if ((key.is_empty()&&modifier)||(key==&name&&!modifier))&&*c==ctrl&&*s==shift&&*a==alt&&*m==meta)
                             {
                                 fire(&mut state);
                             }
                         }
                         EventType::KeyRelease(key) => {
                             state.pressed.remove(&key);
+                            if state.capturing
+                                && state.pressed.is_empty()
+                                && let Some(binding) = state.capture_modifiers.take()
+                            {
+                                state.binding = Some(binding.clone());
+                                state.capturing = false;
+                                state.last = Some(Instant::now());
+                                emit(SystemEvent::Captured(binding));
+                            }
                         }
                         EventType::ButtonPress(button) => {
                             let button = match button {
@@ -149,12 +170,15 @@ impl System {
     pub fn configure(&self, binding: Option<Hotkey>, _: bool, _: bool) {
         if let Ok(mut state) = self.listener.lock() {
             state.binding = binding;
+            state.capturing = false;
+            state.capture_modifiers = None;
         }
     }
     pub fn capture(&self) {
         if let Ok(mut state) = self.listener.lock() {
             state.capturing = true;
             state.pressed.clear();
+            state.capture_modifiers = None;
         }
     }
     pub fn hide() {
@@ -174,6 +198,9 @@ impl System {
     }
     pub fn flash(enabled: bool) {
         unsafe {
+            if let Ok(tray) = FindWindowW(CLASS, None) {
+                let _ = PostMessageW(Some(tray), WM_FLASH, WPARAM(enabled as usize), LPARAM(0));
+            }
             if let Ok(window) = FindWindowW(None, TITLE) {
                 let info = FLASHWINFO {
                     cbSize: size_of::<FLASHWINFO>() as u32,
@@ -297,6 +324,20 @@ unsafe extern "system" fn window_proc(
 ) -> LRESULT {
     unsafe {
         match message {
+            WM_FLASH => {
+                if wparam.0 != 0 {
+                    let _ = SetTimer(Some(window), 1, 500, None);
+                } else {
+                    let _ = KillTimer(Some(window), 1);
+                    tray_icon(window, false);
+                }
+                LRESULT(0)
+            }
+            WM_TIMER => {
+                let previous = TRAY_LIT.fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
+                tray_icon(window, !previous);
+                LRESULT(0)
+            }
             WM_SHOW => {
                 emit(SystemEvent::Show);
                 LRESULT(0)
@@ -353,6 +394,29 @@ unsafe extern "system" fn window_proc(
                 LRESULT(0)
             }
             _ => DefWindowProcW(window, message, wparam, lparam),
+        }
+    }
+}
+
+unsafe fn tray_icon(window: HWND, lit: bool) {
+    unsafe {
+        if let Ok(icon) = LoadIconW(
+            None,
+            if lit {
+                IDI_INFORMATION
+            } else {
+                IDI_APPLICATION
+            },
+        ) {
+            let data = NOTIFYICONDATAW {
+                cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+                hWnd: window,
+                uID: 1,
+                uFlags: NIF_ICON,
+                hIcon: icon,
+                ..Default::default()
+            };
+            let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
         }
     }
 }

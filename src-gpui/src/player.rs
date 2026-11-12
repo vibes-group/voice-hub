@@ -1,4 +1,4 @@
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(all(target_os = "windows", feature = "desktop")))]
 use std::path::Path;
 
 pub enum PlayerAction {
@@ -8,6 +8,7 @@ pub enum PlayerAction {
     Rate(f64),
     Resize(i32, i32),
     Stop,
+    Fallback,
 }
 pub enum PlayerEvent {
     Status {
@@ -16,17 +17,21 @@ pub enum PlayerEvent {
         paused: bool,
     },
     Error(String),
+    Frame(crate::media::VideoImage),
 }
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "desktop"))]
 #[path = "player_windows.rs"]
 mod platform;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "desktop"))]
 pub use platform::*;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(all(target_os = "windows", feature = "desktop")))]
 pub struct Player;
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(all(target_os = "windows", feature = "desktop")))]
 impl Player {
-    pub fn open(_: &Path) -> Result<(Self, tokio::sync::mpsc::Receiver<PlayerEvent>), String> {
+    pub fn open(
+        _: &Path,
+        _: &str,
+    ) -> Result<(Self, tokio::sync::mpsc::Receiver<PlayerEvent>), String> {
         Err("Нативный видеоплеер доступен в сборке Windows".into())
     }
     pub fn action(&self, _: PlayerAction) {}
