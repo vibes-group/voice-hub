@@ -1,0 +1,15 @@
+[package]
+name = "grid"
+version = "0.18.0"
+edition = "2024"
+publish = false
+license = "MIT"
+description = "Compatibility re-export of fixed upstream grid for GPUI's pinned Taffy"
+
+[features]
+default = ["std"]
+std = ["grid-fixed/std"]
+serde = ["grid-fixed/serde"]
+
+[dependencies]
+grid-fixed = { package = "grid", version = "=1.0.1", default-features = false }

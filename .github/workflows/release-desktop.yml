@@ -167,7 +167,9 @@ jobs:
         working-directory: src-gpui
         env:
           APP_RELEASE_VERSION: ${{ needs.build-windows.outputs.tag }}
-        run: cargo build --locked --release --target $env:DESKTOP_TARGET
+        run: |
+          cargo build --locked --release --target $env:DESKTOP_TARGET
+          cargo test --locked --release -p grid@0.18.0 --target $env:DESKTOP_TARGET
 
       - name: Package and attach GPUI beta
         shell: pwsh

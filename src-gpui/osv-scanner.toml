@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "GHSA-38c5-483c-4qqp"
+reason = "False positive on the local grid 0.18 compatibility crate: it only re-exports the fixed registry grid 1.0.1. No upstream grid 0.18 source is linked. The overflow regression is tested in both debug and release."

@@ -46,4 +46,6 @@ jobs:
           cargo test --locked --workspace
       - name: Build release binary
         working-directory: src-gpui
-        run: cargo build --locked --release
+        run: |
+          cargo build --locked --release
+          cargo test --locked --release -p grid@0.18.0

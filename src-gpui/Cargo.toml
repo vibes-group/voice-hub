@@ -8,7 +8,7 @@ license = "MIT"
 description = "Native Voice Hub desktop beta"
 
 [workspace]
-members = ["taffy-compat"]
+members = ["grid-compat"]
 resolver = "2"
 
 [features]
@@ -34,9 +34,9 @@ tokio-tungstenite = { version = "=0.30.0", default-features = false, features = 
 url = "=2.5.8"
 
 [patch.crates-io]
-# GPUI pins Taffy exactly to 0.9.0, whose grid dependency has CVE-2026-42199.
-# Re-export the compatible upstream patch release with its fixed dependency.
-taffy = { path = "taffy-compat" }
+# GPUI's pinned Taffy requires grid 0.18. Re-export the fixed implementation
+# through a compatibility crate; no vulnerable grid source is included.
+grid = { path = "grid-compat" }
 
 [profile.release]
 lto = "thin"
