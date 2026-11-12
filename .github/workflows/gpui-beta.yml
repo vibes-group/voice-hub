@@ -2,7 +2,6 @@ name: GPUI Beta
 
 on:
   push:
-    branches: [main]
     paths:
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
