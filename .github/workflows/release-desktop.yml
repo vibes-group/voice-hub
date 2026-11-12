@@ -162,13 +162,19 @@ jobs:
           if (-not $compiler) { throw 'Windows SDK fxc.exe is required by GPUI' }
           "GPUI_FXC_PATH=$($compiler.FullName)" >> $env:GITHUB_ENV
 
-      - name: Check and test GPUI beta
+      - name: Check GPUI formatting
         working-directory: src-gpui
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          cargo fmt --check
-          cargo clippy --locked --workspace --all-targets --target $env:DESKTOP_TARGET -- -D warnings
-          cargo test --locked --workspace --target $env:DESKTOP_TARGET
+        run: cargo fmt --check
+
+      - name: Check GPUI code
+        working-directory: src-gpui
+        timeout-minutes: 20
+        run: cargo clippy --locked --workspace --all-targets --target $env:DESKTOP_TARGET -- -D warnings
+
+      - name: Test native GPUI features
+        working-directory: src-gpui
+        timeout-minutes: 20
+        run: cargo test --locked --workspace --target $env:DESKTOP_TARGET
 
       - name: Build GPUI beta
         working-directory: src-gpui
