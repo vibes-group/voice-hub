@@ -1,0 +1,4 @@
+# The reviewed WebRTC SDK uses the static MSVC runtime.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+rustdocflags = ["-C", "target-feature=+crt-static"]
