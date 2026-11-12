@@ -190,7 +190,6 @@ impl Client {
                             .get(&format!("room{number}"))
                             .into_iter()
                             .flatten()
-                            .take(8)
                             .map(|peer| {
                                 hint(format!(
                                     "{} {}",
@@ -253,6 +252,11 @@ impl Client {
                     button(format!("panel:{label}"), label, self.panel == panel).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.panel = panel;
+                            if panel == Panel::Chat {
+                                this.scroll.scroll_to_bottom();
+                            } else {
+                                this.scroll.set_offset(point(px(0.0), px(0.0)));
+                            }
                             if panel == Panel::Audio {
                                 this.microphones = enumerate(true);
                                 this.speakers = enumerate(false);
@@ -268,6 +272,7 @@ impl Client {
                     button("admin", "Пароли подключения", self.panel == Panel::Admin).on_click(
                         cx.listener(|this, _, _, cx| {
                             this.panel = Panel::Admin;
+                            this.scroll.set_offset(point(px(0.0), px(0.0)));
                             this.act(Action::Admin(AdminAction::List));
                             cx.notify();
                         }),
@@ -1427,7 +1432,15 @@ impl Render for Client {
                         .gap_5()
                         .flex_1()
                         .min_h_0()
-                        .child(self.sidebar(cx))
+                        .child(
+                            div()
+                                .id("sidebar-scroll")
+                                .w(px(225.0))
+                                .flex_shrink_0()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                .child(self.sidebar(cx)),
+                        )
                         .child(
                             div()
                                 .id("content")
