@@ -185,6 +185,46 @@ pub fn microphone_mid(answer: &str) -> Option<String> {
     None
 }
 
+/// Byte ranges remain valid for GPUI shaping, including non-ASCII message text.
+pub fn message_links(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let lower = text.to_ascii_lowercase();
+    let mut links = Vec::new();
+    let mut offset = 0;
+    while offset < text.len() {
+        let Some(start) = ["https://", "http://", "www."]
+            .into_iter()
+            .filter_map(|prefix| lower[offset..].find(prefix).map(|index| offset + index))
+            .min()
+        else {
+            break;
+        };
+        let raw = text[start..]
+            .split(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '\"' | '\''))
+            .next()
+            .unwrap_or("");
+        let mut token = raw.trim_end_matches(['.', ',', '!', '?', ';', ':']);
+        for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+            while token.ends_with(close)
+                && token.matches(close).count() > token.matches(open).count()
+            {
+                token = &token[..token.len() - 1];
+            }
+        }
+        let href = if lower[start..].starts_with("www.") {
+            format!("https://{token}")
+        } else {
+            token.into()
+        };
+        if url::Url::parse(&href)
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+        {
+            links.push((start..start + token.len(), href));
+        }
+        offset = start + raw.len().max(1);
+    }
+    links
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

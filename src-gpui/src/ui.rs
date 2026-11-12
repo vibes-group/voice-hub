@@ -38,6 +38,27 @@ fn hint(text: impl Into<SharedString>) -> Div {
 fn field(label: &str, input: Entity<Input>) -> Div {
     column().gap_1().child(hint(label.to_owned())).child(input)
 }
+fn message_text(id: &str, text: &str) -> Div {
+    let links = voice_hub_gpui_beta::protocol::message_links(text);
+    let ranges = links
+        .iter()
+        .map(|(range, _)| range.clone())
+        .collect::<Vec<_>>();
+    let styled =
+        StyledText::new(text.to_owned()).with_highlights(ranges.iter().cloned().map(|range| {
+            (
+                range,
+                HighlightStyle {
+                    color: Some(rgb(0x73c9f5).into()),
+                    ..Default::default()
+                },
+            )
+        }));
+    div().text_sm().child(
+        InteractiveText::new(SharedString::from(format!("text:{id}")), styled)
+            .on_click(ranges, move |index, _, cx| cx.open_url(&links[index].1)),
+    )
+}
 #[derive(Clone)]
 enum Volume {
     Input,
@@ -666,7 +687,7 @@ impl Client {
                 let delete_id=message.id.clone();let retry=message.client_msg_id.clone();let cancel=message.client_msg_id.clone();let copy=message.text.clone();let attachments=message.attachments.clone();
                 card().child(row().justify_between().child(div().font_weight(FontWeight::BOLD).child(if message.sender_name.is_empty(){self.state.peers.get(&message.from).map_or("Гость",|p|p.display_name.as_str()).to_owned()}else{message.sender_name.clone()}))
                     .child(hint(format!("{:02}:{:02}",(message.ts/3600000)%24,(message.ts/60000)%60))))
-                    .when(!message.text.is_empty(),|v|v.child(div().text_sm().child(message.text.clone())))
+                    .when(!message.text.is_empty(),|v|v.child(message_text(&message.id, &message.text)))
                     .children(message.attachments.iter().map(|a|self.attachment_view(a,message.deleted_upload_ids.contains(&a.upload_id),cx)))
                     .when(message.pending,|v|v.child(hint(if message.failed{"Не отправлено".into()}else{format!("Отправка · {}%",(message.upload_progress*100.0) as u32)})))
                     .child(row().child(button(format!("copy:{}",message.id),"Копировать",false).on_click(move|_,_,cx|cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))))
