@@ -35,6 +35,6 @@ impl Player {
         Err("Нативный видеоплеер доступен в сборке Windows".into())
     }
     pub fn action(&self, _: PlayerAction) {}
-    pub fn place(&self, _: i32, _: i32, _: i32, _: i32) {}
+    pub fn place(&self, _: i32, _: i32, _: i32, _: i32, _: [i32; 4]) {}
     pub fn hide(&self) {}
 }

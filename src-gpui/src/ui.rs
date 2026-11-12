@@ -437,6 +437,7 @@ impl Client {
         let download = attachment.clone();
         let remove = attachment.upload_id.clone();
         let open = attachment.clone();
+        let retry = attachment.clone();
         let image = self
             .images
             .get(&attachment.upload_id)
@@ -498,6 +499,27 @@ impl Client {
                 })
                 .child(
                     row()
+                        .when(
+                            attachment.kind == "image"
+                                && image.is_none()
+                                && !self.loading.contains(&attachment.upload_id),
+                            |row| {
+                                row.child(
+                                    button(
+                                        format!("retry-image:{}", attachment.upload_id),
+                                        "Повторить загрузку",
+                                        false,
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            this.images.remove(&retry.upload_id);
+                                            this.load_images();
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                            },
+                        )
                         .child(
                             button(
                                 format!("download:{}", attachment.upload_id),
@@ -563,11 +585,18 @@ impl Client {
                         move |bounds, _, window, cx| {
                             if let Some(player) = &entity.read(cx).player {
                                 let factor = window.scale_factor();
+                                let clip = bounds.intersect(&window.content_mask().bounds);
                                 player.place(
                                     (f32::from(bounds.origin.x) * factor) as i32,
                                     (f32::from(bounds.origin.y) * factor) as i32,
                                     (f32::from(bounds.size.width) * factor) as i32,
                                     (f32::from(bounds.size.height) * factor) as i32,
+                                    [
+                                        (f32::from(clip.origin.x) * factor) as i32,
+                                        (f32::from(clip.origin.y) * factor) as i32,
+                                        (f32::from(clip.right()) * factor) as i32,
+                                        (f32::from(clip.bottom()) * factor) as i32,
+                                    ],
                                 );
                             }
                         }

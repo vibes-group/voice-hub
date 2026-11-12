@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use super::{PlayerAction, PlayerEvent};
 use windows::{
-    Win32::{Foundation::*, Media::MediaFoundation::*, System::Com::*, UI::WindowsAndMessaging::*},
+    Win32::{
+        Foundation::*, Graphics::Gdi::*, Media::MediaFoundation::*, System::Com::*,
+        UI::WindowsAndMessaging::*,
+    },
     core::{BSTR, Interface, implement, w},
 };
 
@@ -80,9 +83,17 @@ impl Player {
     pub fn action(&self, action: PlayerAction) {
         let _ = self.actions.send(action);
     }
-    pub fn place(&self, x: i32, y: i32, width: i32, height: i32) {
+    pub fn place(&self, x: i32, y: i32, width: i32, height: i32, clip: [i32; 4]) {
         unsafe {
             let child = HWND(self.child as *mut _);
+            if clip[2] <= clip[0] || clip[3] <= clip[1] {
+                let _ = ShowWindow(child, SW_HIDE);
+                return;
+            }
+            let region = CreateRectRgn(clip[0] - x, clip[1] - y, clip[2] - x, clip[3] - y);
+            if SetWindowRgn(child, Some(region), true) == 0 {
+                let _ = DeleteObject(region.into());
+            }
             let _ = MoveWindow(child, x, y, width.max(1), height.max(1), true);
             let _ = ShowWindow(child, SW_SHOWNA);
         }
