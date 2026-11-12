@@ -28,8 +28,14 @@ use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn native_microphone_and_receive_slot_interoperate_with_sfu() {
-    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let address = socket.local_addr().unwrap();
+    // WebRTC gathers real interface candidates; a loopback-bound Windows socket cannot reach them.
+    let route = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+    route.connect("192.0.2.1:9").unwrap(); // Route lookup only: no packet is sent.
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.unwrap();
+    let address = std::net::SocketAddr::new(
+        route.local_addr().unwrap().ip(),
+        socket.local_addr().unwrap().port(),
+    );
     let mut server = Rtc::builder()
         .set_rtp_mode(true)
         .clear_codecs()
@@ -97,7 +103,7 @@ async fn native_microphone_and_receive_slot_interoperate_with_sfu() {
         tokio::select! {
             _=tick.tick()=>{let now=Instant::now();server.handle_input(Input::Timeout(now)).unwrap();if pc.connection_state()==PeerConnectionState::Connected{source.capture_frame(&AudioFrame{data:Cow::Borrowed(&tone),sample_rate:48000,num_channels:1,samples_per_channel:480}).await.unwrap();}},
             Ok((len,from))=socket.recv_from(&mut buffer)=>{server.handle_input(Input::Receive(Instant::now(),Receive{proto:Protocol::Udp,source:from,destination:address,contents:(&buffer[..len]).try_into().unwrap()})).unwrap();},
-            Some(candidate)=candidate_rx.recv()=>{if let Ok(candidate)=Candidate::from_sdp_string(&candidate){server.add_remote_candidate(candidate);}},
+            Some(candidate)=candidate_rx.recv()=>{if let Ok(candidate)=Candidate::from_sdp_string(&candidate) && candidate.addr().is_ipv4(){server.add_remote_candidate(candidate);}},
             Some(event)=track_rx.recv()=>{assert_eq!(event.streams.first().unwrap().id(),"slot-0");if let MediaStreamTrack::Audio(track)=event.track{sink=Some(NativeAudioStream::new(track,48000,1));}},
             Some(frame)=async{match &mut sink{Some(sink)=>sink.next().await,None=>std::future::pending().await}}=>{for sample in frame.data.iter(){peak=peak.max((*sample as f32/32768.0).abs());}},
         }
@@ -105,10 +111,9 @@ async fn native_microphone_and_receive_slot_interoperate_with_sfu() {
             match server.poll_output().unwrap() {
                 Output::Timeout(_) => break,
                 Output::Transmit(packet) => {
-                    socket
-                        .send_to(&packet.contents, packet.destination)
-                        .await
-                        .unwrap();
+                    // Failed probes are normal with multiple ICE interfaces. The test still
+                    // requires a connected transport, received RTP and audible decoded PCM.
+                    let _ = socket.send_to(&packet.contents, packet.destination).await;
                 }
                 Output::Event(Event::RtpPacket(packet)) => {
                     received += 1;
