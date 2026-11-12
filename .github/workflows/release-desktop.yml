@@ -102,6 +102,9 @@ jobs:
             echo
             echo "**Windows:** [\`${INSTALLER}\`](${INSTALLER_URL})"
             echo
+            echo "**GPUI beta (Windows, portable):** [\`Voice-Hub-GPUI-Beta_${TAG}_windows-x86_64.zip\`](https://github.com/${REPO}/releases/download/${TAG}/Voice-Hub-GPUI-Beta_${TAG}_windows-x86_64.zip)"
+            echo 'Native voice preview: default audio devices at 48 kHz, IPv4/direct UDP, mute/deafen. Use headphones; no echo cancellation, noise suppression, screen sharing, chat, tray or auto-update.'
+            echo
             if [ -n "$feats"  ]; then echo '## Features';    echo "$feats";  echo; fi
             if [ -n "$fixes"  ]; then echo '## Fixes';       echo "$fixes";  echo; fi
             if [ -n "$others" ]; then echo '## Other';       echo "$others"; echo; fi
@@ -124,6 +127,75 @@ jobs:
           prerelease: false
           args: --target ${{ env.DESKTOP_TARGET }}
           updaterJsonPreferNsis: true
+
+  build-gpui-beta:
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build-windows.outputs.tag }}
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master (no tags upstream)
+        with:
+          toolchain: 1.99.1
+          targets: ${{ env.DESKTOP_TARGET }}
+
+      - name: Check dependency release ages
+        run: python scripts/check-cargo-age.py src-gpui/Cargo.lock
+
+      - name: Find DirectX shader compiler
+        shell: pwsh
+        run: |
+          $compiler = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\fxc.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $compiler) { throw 'Windows SDK fxc.exe is required by GPUI' }
+          "GPUI_FXC_PATH=$($compiler.FullName)" >> $env:GITHUB_ENV
+
+      - name: Check and test GPUI beta
+        working-directory: src-gpui
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets --target $env:DESKTOP_TARGET -- -D warnings
+          cargo test --locked --workspace --target $env:DESKTOP_TARGET
+
+      - name: Build GPUI beta
+        working-directory: src-gpui
+        env:
+          APP_RELEASE_VERSION: ${{ needs.build-windows.outputs.tag }}
+        run: cargo build --locked --release --target $env:DESKTOP_TARGET
+
+      - name: Package and attach GPUI beta
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
+        run: |
+          $archive = "Voice-Hub-GPUI-Beta_${env:TAG}_windows-x86_64.zip"
+          New-Item -ItemType Directory -Path gpui-beta | Out-Null
+          Copy-Item "src-gpui/target/$env:DESKTOP_TARGET/release/voice-hub-gpui-beta.exe" gpui-beta/
+          Copy-Item src-gpui/BETA.txt, LICENSE gpui-beta/
+          $metadata = cargo metadata --locked --format-version 1 --filter-platform $env:DESKTOP_TARGET --manifest-path src-gpui/Cargo.toml | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot collect dependency license notices' }
+          foreach ($package in $metadata.packages) {
+            if (-not $package.source) { continue }
+            $directory = Split-Path $package.manifest_path
+            $notices = Get-ChildItem $directory -File | Where-Object { $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\b|[-_.])' }
+            if ($notices) {
+              $destination = "gpui-beta/licenses/$($package.name)-$($package.version)"
+              New-Item -ItemType Directory -Path $destination -Force | Out-Null
+              $notices | Copy-Item -Destination $destination
+            }
+          }
+          Compress-Archive -Path gpui-beta/* -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -Encoding utf8NoBOM "$archive.sha256"
+          gh release upload "$env:TAG" $archive "$archive.sha256" --repo "$env:REPO" --clobber
 
   publish-update-mirror:
     needs: build-windows

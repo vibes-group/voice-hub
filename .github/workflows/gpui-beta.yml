@@ -1,0 +1,50 @@
+name: GPUI Beta
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src-gpui/**'
+      - 'scripts/check-cargo-age.py'
+      - 'backend/src/sfu/testdata/**'
+      - '.github/workflows/gpui-beta.yml'
+  pull_request:
+    paths:
+      - 'src-gpui/**'
+      - 'scripts/check-cargo-age.py'
+      - 'backend/src/sfu/testdata/**'
+      - '.github/workflows/gpui-beta.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master (no tags upstream)
+        with:
+          toolchain: 1.99.1
+      - name: Check dependency release ages
+        run: python scripts/check-cargo-age.py src-gpui/Cargo.lock
+      - name: Find DirectX shader compiler
+        shell: pwsh
+        run: |
+          $compiler = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\fxc.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $compiler) { throw 'Windows SDK fxc.exe is required by GPUI' }
+          "GPUI_FXC_PATH=$($compiler.FullName)" >> $env:GITHUB_ENV
+      - name: Check and test GPUI beta
+        working-directory: src-gpui
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --workspace
+      - name: Build release binary
+        working-directory: src-gpui
+        run: cargo build --locked --release

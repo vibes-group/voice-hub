@@ -7,11 +7,13 @@ tmp/
 *.log
 *.test
 *.prof
+__pycache__/
 .env
 .env.local
 backend/.env
 backend/data/
 src-tauri/target/
+src-gpui/target/
 src-tauri/gen/schemas/
 scratch
 docker-compose.override.yml

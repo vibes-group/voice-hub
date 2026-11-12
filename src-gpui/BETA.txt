@@ -1,0 +1,22 @@
+Voice Hub - GPUI Beta (Windows x86_64)
+
+Extract the ZIP and run voice-hub-gpui-beta.exe. Enter your server's HTTPS
+address, display name and server password, then select a room and connect.
+The microphone starts muted. Click the microphone button to speak.
+
+This build runs separately from the stable desktop client. It uses native
+GPUI rendering and native Opus audio, without a WebView.
+
+Supported: voice rooms, participant list, mute and deafen; default input and
+output devices supporting 48 kHz, mono/stereo f32/i16/u16. IPv4 and direct UDP
+access to the server are required. HTTP is allowed only on loopback for local
+development. Passwords and session cookies are held in memory only.
+
+Use headphones: this beta has no acoustic echo cancellation or noise
+suppression. Screen sharing, chat, device selection, TURN relay, automatic
+reconnection, tray, global hotkeys and automatic updates are not included.
+Closing the window ends the call. After a network or device error, reconnect.
+
+For comparisons, use the same room and devices, with noise suppression off
+in the stable client. Measure the entire process tree, both idle and in a
+call. This preview has no measured performance advantage yet.

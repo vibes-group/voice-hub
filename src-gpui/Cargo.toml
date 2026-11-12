@@ -1,0 +1,44 @@
+[package]
+name = "voice-hub-gpui-beta"
+version = "0.1.0-beta.1"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "MIT"
+description = "Native Voice Hub desktop beta"
+
+[workspace]
+members = ["taffy-compat"]
+resolver = "2"
+
+[features]
+default = ["desktop"]
+desktop = ["dep:gpui", "dep:cpal"]
+
+[[bin]]
+name = "voice-hub-gpui-beta"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[dependencies]
+cpal = { version = "=0.18.2", optional = true }
+futures-util = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
+gpui = { version = "=0.2.2", optional = true }
+opus = "=0.4.0"
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "form"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.154"
+str0m = { version = "=0.24.1", default-features = false, features = ["aws-lc-rs"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+url = "=2.5.8"
+
+[patch.crates-io]
+# GPUI pins Taffy exactly to 0.9.0, whose grid dependency has CVE-2026-42199.
+# Re-export the compatible upstream patch release with its fixed dependency.
+taffy = { path = "taffy-compat" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

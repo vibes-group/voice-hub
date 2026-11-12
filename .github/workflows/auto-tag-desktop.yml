@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'src-tauri/**'
+      - 'src-gpui/**'
+      - 'scripts/check-cargo-age.py'
+      - '.github/workflows/release-desktop.yml'
   workflow_dispatch:
 
 concurrency:

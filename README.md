@@ -24,6 +24,12 @@
 
 Сборка универсальная: адрес сервера вводится при первом запуске.
 
+В релизах также публикуется отдельный portable ZIP **GPUI Beta** для Windows.
+В бете доступны голосовые комнаты, список участников, mute/deafen. Нужны
+наушники, устройства по умолчанию с поддержкой 48 кГц и прямой UDP-доступ
+к серверу по IPv4. Эхоподавление, шумоподавление, чат, демонстрация экрана,
+TURN, трей и автообновление доступны в стабильном клиенте.
+
 ## Разработка
 
 ```bash
@@ -45,6 +51,14 @@ Desktop-клиент (`src-tauri/`) локально:
 cd src-tauri
 cargo install tauri-cli --version '^2'
 cargo tauri dev
+```
+
+GPUI beta (`src-gpui/`), Windows с Visual Studio Build Tools и Windows SDK:
+
+```bash
+python scripts/check-cargo-age.py src-gpui/Cargo.lock
+cd src-gpui
+cargo run --locked
 ```
 
 ## Лицензия
