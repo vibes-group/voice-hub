@@ -309,7 +309,7 @@ jobs:
               done
               for existing in /updates/*; do
                 name=$(basename "$existing")
-                case "$name" in latest.json|gpui-latest.json) continue ;; esac
+                case "$name" in latest.json|gpui-latest.json|ffmpeg-*.zip) continue ;; esac
                 [ -f "$stage/$name" ] && continue
                 rm -f "$existing"
               done

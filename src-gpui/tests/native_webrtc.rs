@@ -84,7 +84,7 @@ async fn native_microphone_and_receive_slot_interoperate_with_sfu() {
         .sdp_api()
         .accept_answer(pending, SdpAnswer::from_sdp_string(&sdp).unwrap())
         .unwrap();
-    let mut sink = None;
+    let mut sink: Option<NativeAudioStream> = None;
     let mut peak = 0.0f32;
     let mut received = 0;
     let mut buffer = [0u8; 65536];

@@ -44,6 +44,48 @@ pub struct Mixer {
     tracks: HashMap<String, VecDeque<f32>>,
 }
 
+#[derive(Default)]
+pub struct StereoMixer {
+    tracks: HashMap<String, VecDeque<[f32; 2]>>,
+}
+impl StereoMixer {
+    pub fn push(&mut self, track: String, samples: &[f32], channels: usize) {
+        if channels == 0 {
+            return;
+        }
+        let queue = self.tracks.entry(track).or_default();
+        queue.extend(
+            samples
+                .chunks_exact(channels)
+                .map(|frame| [frame[0], if channels > 1 { frame[1] } else { frame[0] }]),
+        );
+        if queue.len() > MAX_BUFFER {
+            queue.drain(..queue.len() - MAX_BUFFER);
+        }
+    }
+    pub fn remove(&mut self, track: &str) {
+        self.tracks.remove(track);
+    }
+    pub fn clear(&mut self) {
+        self.tracks.clear();
+    }
+    pub fn render(&mut self) -> [[f32; 2]; FRAME] {
+        let mut mixed = [[0.0f32; 2]; FRAME];
+        for queue in self.tracks.values_mut() {
+            for output in &mut mixed {
+                let frame = queue.pop_front().unwrap_or([0.0; 2]);
+                output[0] += frame[0];
+                output[1] += frame[1];
+            }
+        }
+        for output in &mut mixed {
+            output[0] = output[0].clamp(-1.0, 1.0);
+            output[1] = output[1].clamp(-1.0, 1.0);
+        }
+        mixed
+    }
+}
+
 impl Mixer {
     pub fn push(&mut self, track: String, samples: &[f32]) {
         let queue = self.tracks.entry(track).or_default();
@@ -78,6 +120,25 @@ impl Mixer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn screen_stereo_survives_mixing_with_mono_voice() {
+        let mut mixer = StereoMixer::default();
+        mixer.push("voice".into(), &[0.2; FRAME], 1);
+        mixer.push("screen".into(), &[0.3, -0.4].repeat(FRAME), 2);
+        assert_eq!(mixer.render()[0], [0.5, -0.2]);
+    }
+    #[test]
+    fn device_resampling_keeps_fractional_phase_between_callbacks() {
+        let mut resampler = Resampler::new(44100, 48000);
+        let mut count = 0;
+        for _ in 0..44100 {
+            resampler.push(0.25, |sample| {
+                assert_eq!(sample, 0.25);
+                count += 1;
+            });
+        }
+        assert_eq!(count, 48000);
+    }
 
     #[test]
     fn mixes_simultaneous_voices_and_discards_stale_audio() {
@@ -88,25 +149,5 @@ mod tests {
         assert_eq!(mixer.tracks["a"].len(), MAX_BUFFER - FRAME);
         mixer.clear();
         assert_eq!(mixer.render(), [0.0; FRAME]);
-    }
-
-    #[test]
-    fn native_opus_round_trip() {
-        let mut encoder =
-            opus::Encoder::new(SAMPLE_RATE, opus::Channels::Mono, opus::Application::Voip).unwrap();
-        let mut decoder = opus::Decoder::new(SAMPLE_RATE, opus::Channels::Mono).unwrap();
-        let input: Vec<_> = (0..FRAME)
-            .map(|i| ((i as f32 * 440.0 * std::f32::consts::TAU) / SAMPLE_RATE as f32).sin() * 0.1)
-            .collect();
-        let mut packet = [0; 4000];
-        let len = encoder.encode_float(&input, &mut packet).unwrap();
-        let mut output = [0.0; FRAME];
-        assert_eq!(
-            decoder
-                .decode_float(&packet[..len], &mut output, false)
-                .unwrap(),
-            FRAME
-        );
-        assert!(output.iter().any(|s| s.abs() > 0.01));
     }
 }

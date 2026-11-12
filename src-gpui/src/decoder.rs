@@ -13,7 +13,7 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 
 use crate::{
-    device::{AudioOutput, Playback},
+    device::{AudioOutput, StereoPlayback as Playback},
     media::VideoImage,
     player::{PlayerAction, PlayerEvent},
     settings::Storage,
@@ -64,13 +64,18 @@ struct Metadata {
 }
 struct Running {
     tasks: Vec<tokio::task::JoinHandle<()>>,
-    at: Instant,
+    clock: Arc<std::sync::OnceLock<Instant>>,
     position: f64,
     rate: f64,
 }
 impl Running {
     fn position(&self) -> f64 {
-        self.position + self.at.elapsed().as_secs_f64() * self.rate
+        self.position
+            + self
+                .clock
+                .get()
+                .map_or(0.0, |at| at.elapsed().as_secs_f64())
+                * self.rate
     }
 }
 impl Drop for Running {
@@ -356,8 +361,6 @@ fn start(
             "mov,matroska,webm,avi,ogg,mpeg,mpegts",
             "-ss",
             &position.to_string(),
-            "-readrate",
-            &rate.to_string(),
             "-i",
         ])
         .arg(path)
@@ -382,13 +385,37 @@ fn start(
         .ok_or("Не удалось открыть поток видео")?;
     let (width, height) = (metadata.width, metadata.height);
     let sender = events.clone();
+    let clock = Arc::new(std::sync::OnceLock::new());
+    let barrier = Arc::new(tokio::sync::Barrier::new(if playback.is_some() {
+        2
+    } else {
+        1
+    }));
+    let video_clock = clock.clone();
+    let video_barrier = barrier.clone();
+    let fps = metadata.rate;
     let video = tokio::spawn(async move {
         let _child = video;
+        let mut index = 0;
         loop {
             let mut frame = vec![0u8; width as usize * height as usize * 4];
             if stdout.read_exact(&mut frame).await.is_err() {
+                if index == 0 {
+                    let _ =
+                        sender.try_send(PlayerEvent::Error("Не удалось декодировать видео".into()));
+                }
                 break;
             }
+            if index == 0 {
+                video_barrier.wait().await;
+                video_clock.get_or_init(Instant::now);
+            }
+            let at = *video_clock.get().expect("video clock");
+            tokio::time::sleep_until(tokio::time::Instant::from_std(
+                at + Duration::from_secs_f64(index as f64 / fps / rate + 0.04),
+            ))
+            .await;
+            index += 1;
             if sender.is_closed() {
                 break;
             }
@@ -413,8 +440,6 @@ fn start(
                 "mov,matroska,webm,avi,ogg,mpeg,mpegts,mp3,wav,flac",
                 "-ss",
                 &position.to_string(),
-                "-readrate",
-                &rate.to_string(),
                 "-i",
             ])
             .arg(path)
@@ -423,7 +448,7 @@ fn start(
                 "-af",
                 &format!("atempo={rate}"),
                 "-ac",
-                "1",
+                "2",
                 "-ar",
                 "48000",
                 "-f",
@@ -433,10 +458,18 @@ fn start(
             .spawn()
             .map_err(|_| "Не удалось запустить звук видео")?;
         let mut stdout = audio.stdout.take().ok_or("Не удалось открыть звук видео")?;
+        let audio_clock = clock.clone();
+        let sender = events.clone();
         tasks.push(tokio::spawn(async move {
             let _child = audio;
-            let mut frame = [0u8; 480 * 4];
+            let mut started = false;
+            let mut frame = [0u8; 480 * 8];
             while stdout.read_exact(&mut frame).await.is_ok() {
+                if !started {
+                    barrier.wait().await;
+                    audio_clock.get_or_init(Instant::now);
+                    started = true;
+                }
                 loop {
                     let queued = playback.lock().map_or(0, |q| q.len());
                     if queued < 2880 {
@@ -446,21 +479,34 @@ fn start(
                 }
                 let volume = f32::from_bits(gain.load(Ordering::Relaxed));
                 if let Ok(mut queue) = playback.lock() {
-                    queue.extend(frame.as_chunks::<4>().0.iter().map(|bytes| {
-                        let value = f32::from_le_bytes(*bytes);
-                        if value.is_finite() {
-                            (value * volume).clamp(-1.0, 1.0)
-                        } else {
-                            0.0
+                    queue.extend(frame.as_chunks::<8>().0.iter().map(|bytes| {
+                        let mut stereo = [0.0; 2];
+                        for (channel, to) in stereo.iter_mut().enumerate() {
+                            let value = f32::from_le_bytes(
+                                bytes[channel * 4..channel * 4 + 4]
+                                    .try_into()
+                                    .expect("four bytes"),
+                            );
+                            *to = if value.is_finite() {
+                                (value * volume).clamp(-1.0, 1.0)
+                            } else {
+                                0.0
+                            };
                         }
+                        stereo
                     }));
                 }
+            }
+            if !started {
+                let _ = sender.try_send(PlayerEvent::Error(
+                    "Не удалось декодировать звук видео".into(),
+                ));
             }
         }));
     }
     Ok(Running {
         tasks,
-        at: Instant::now(),
+        clock,
         position,
         rate,
     })
@@ -524,7 +570,7 @@ mod tests {
             .unwrap();
             let (mut frames, mut audible) = (0, false);
             let mut tick = tokio::time::interval(Duration::from_millis(10));
-            tokio::time::timeout(Duration::from_secs(10),async{while frames<2||!audible{tokio::select!{Some(PlayerEvent::Frame(frame))=rx.recv()=>{assert_eq!(frame.bgra.len(),160*90*4);frames+=1;},_=tick.tick()=>{let mut queue=playback.lock().unwrap();audible|=queue.iter().any(|sample|sample.abs()>0.01);queue.clear();}}}}).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(10),async{while frames<2||!audible{tokio::select!{Some(PlayerEvent::Frame(frame))=rx.recv()=>{assert_eq!(frame.bgra.len(),160*90*4);frames+=1;},_=tick.tick()=>{let mut queue=playback.lock().unwrap();audible|=queue.iter().flatten().any(|sample|sample.abs()>0.01);queue.clear();}}}}).await.unwrap();
             drop(active);
             tokio::time::sleep(Duration::from_millis(100)).await;
             let (events, mut rx) = mpsc::channel(2);

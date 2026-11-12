@@ -964,7 +964,13 @@ impl Client {
             .child(
                 card()
                     .child(title("Глобальная клавиша микрофона"))
-                    .child(hint(format!("{:?}", self.state.settings.hotkey)))
+                    .child(hint(
+                        self.state
+                            .settings
+                            .hotkey
+                            .as_ref()
+                            .map_or_else(|| "Не назначена".into(), Hotkey::label),
+                    ))
                     .child(
                         button(
                             "capture-hotkey",

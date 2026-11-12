@@ -20,6 +20,7 @@ const TITLE: PCWSTR = w!("Voice Hub — GPUI");
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_SHOW: u32 = WM_APP + 2;
 const WM_FLASH: u32 = WM_APP + 3;
+static TRAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static TRAY_LIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static EVENTS: OnceLock<mpsc::Sender<SystemEvent>> = OnceLock::new();
 struct Listener {
@@ -28,6 +29,7 @@ struct Listener {
     pressed: HashSet<Key>,
     last: Option<Instant>,
     capture_modifiers: Option<Hotkey>,
+    focused: bool,
 }
 pub struct System {
     mutex: HANDLE,
@@ -69,6 +71,7 @@ impl System {
                 pressed: HashSet::new(),
                 last: None,
                 capture_modifiers: None,
+                focused: false,
             }));
             let shared = listener.clone();
             std::thread::spawn(move || {
@@ -121,6 +124,7 @@ impl System {
                                 state.last = Some(Instant::now());
                                 emit(SystemEvent::Captured(binding));
                             } else if !state.capturing
+                                && (!state.focused || modifier)
                                 && matches!(&state.binding,Some(Hotkey::Keyboard{key,ctrl:c,shift:s,alt:a,meta:m})if ((key.is_empty()&&modifier)||(key==&name&&!modifier))&&*c==ctrl&&*s==shift&&*a==alt&&*m==meta)
                             {
                                 fire(&mut state);
@@ -173,6 +177,14 @@ impl System {
             state.capturing = false;
             state.capture_modifiers = None;
         }
+    }
+    pub fn set_focused(&self, focused: bool) {
+        if let Ok(mut state) = self.listener.lock() {
+            state.focused = focused;
+        }
+    }
+    pub fn can_hide() -> bool {
+        TRAY_READY.load(std::sync::atomic::Ordering::Relaxed)
     }
     pub fn capture(&self) {
         if let Ok(mut state) = self.listener.lock() {
@@ -307,11 +319,13 @@ unsafe fn tray() -> Result<(), String> {
         if !Shell_NotifyIconW(NIM_ADD, &icon).as_bool() {
             return Err("Не удалось добавить значок".into());
         }
+        TRAY_READY.store(true, std::sync::atomic::Ordering::Relaxed);
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        TRAY_READY.store(false, std::sync::atomic::Ordering::Relaxed);
         let _ = Shell_NotifyIconW(NIM_DELETE, &icon);
         Ok(())
     }

@@ -25,6 +25,10 @@ impl System {
     }
     pub fn configure(&self, _: Option<Hotkey>, _: bool, _: bool) {}
     pub fn capture(&self) {}
+    pub fn set_focused(&self, _: bool) {}
+    pub fn can_hide() -> bool {
+        false
+    }
     pub fn hide() {}
     pub fn show() {}
     pub fn flash(_: bool) {}

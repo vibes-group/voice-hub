@@ -35,7 +35,7 @@ use tokio::sync::mpsc;
 
 use super::{CaptureChoice, VideoImage};
 use crate::{
-    audio::{FRAME, MAX_BUFFER, Mixer},
+    audio::{FRAME, MAX_BUFFER, StereoMixer},
     denoise::Denoiser,
     device::{Devices, Loopback},
     protocol::{Peer, ServerConfig, envelope},
@@ -43,13 +43,14 @@ use crate::{
 };
 
 enum Event {
-    Signal(String),
-    Track(String, TrackEvent),
-    State(String, PeerConnectionState),
-    Audio(String, Vec<f32>),
+    Signal(String, u64, String),
+    Track(String, u64, TrackEvent),
+    State(String, u64, PeerConnectionState),
+    Audio(String, String, u64, Vec<f32>),
     CaptureEnded,
 }
 struct Connection {
+    generation: u64,
     pc: PeerConnection,
     remote_ready: bool,
     candidates: Vec<Value>,
@@ -59,12 +60,31 @@ impl Drop for Connection {
         self.pc.close();
     }
 }
+enum SystemCapture {
+    Process(crate::process_audio::ProcessAudio),
+    Device(Loopback),
+}
+impl SystemCapture {
+    fn open(speaker: &str) -> Result<(Self, bool), String> {
+        match crate::process_audio::ProcessAudio::open() {
+            Ok(capture) => Ok((Self::Process(capture), true)),
+            Err(_) => Ok((Self::Device(Loopback::open(speaker)?), false)),
+        }
+    }
+    fn captured(&mut self) -> &mut tokio::sync::mpsc::Receiver<[f32; FRAME * 2]> {
+        match self {
+            Self::Process(capture) => &mut capture.captured,
+            Self::Device(capture) => &mut capture.captured,
+        }
+    }
+}
 struct Publishing {
     connection: Connection,
     sender: RtpSender,
     capture_stop: Arc<AtomicBool>,
     _capture: std::thread::JoinHandle<()>,
-    loopback: Option<Loopback>,
+    loopback: Option<SystemCapture>,
+    own_audio_filter: Option<AudioProcessingModule>,
     audio: Option<NativeAudioSource>,
     settings: Arc<Mutex<ScreenSettings>>,
 }
@@ -80,6 +100,7 @@ pub struct Media {
     audio: Connection,
     mic: NativeAudioSource,
     devices: Devices,
+    reference: Loopback,
     muted: Arc<AtomicBool>,
     deafened: Arc<AtomicBool>,
     apm: AudioProcessingModule,
@@ -87,7 +108,7 @@ pub struct Media {
     settings: Settings,
     peers: BTreeMap<String, Peer>,
     slots: BTreeMap<String, Option<String>>,
-    mixer: Mixer,
+    mixer: StereoMixer,
     tx: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,
     frames: mpsc::Sender<VideoImage>,
@@ -110,6 +131,19 @@ impl Drop for Media {
 }
 
 impl Media {
+    fn is_current(&self, key: &str, generation: u64) -> bool {
+        if key == "audio" {
+            self.audio.generation == generation
+        } else if key == "screen-pub" {
+            self.publisher
+                .as_ref()
+                .is_some_and(|p| p.connection.generation == generation)
+        } else {
+            self.subscribers
+                .get(key)
+                .is_some_and(|c| c.generation == generation)
+        }
+    }
     pub fn take_audio_failed(&mut self) -> bool {
         std::mem::take(&mut self.audio_failed)
     }
@@ -191,6 +225,7 @@ impl Media {
             &settings.microphone,
             &settings.speaker,
         )?;
+        let reference = Loopback::open(&settings.speaker)?;
         let audio = connection(&factory, &rtc, "audio", &tx)?;
         // APM is applied before the selected denoiser and send gain, once only.
         let mic = NativeAudioSource::new(AudioSourceOptions::default(), 48000, 1, 0);
@@ -210,6 +245,7 @@ impl Media {
             audio,
             mic,
             devices,
+            reference,
             muted,
             deafened,
             apm,
@@ -217,7 +253,7 @@ impl Media {
             settings,
             peers: BTreeMap::new(),
             slots: BTreeMap::new(),
-            mixer: Mixer::default(),
+            mixer: StereoMixer::default(),
             tx,
             events,
             frames,
@@ -255,6 +291,7 @@ impl Media {
         if settings.microphone != self.settings.microphone
             || settings.speaker != self.settings.speaker
         {
+            self.reference = Loopback::open(&settings.speaker)?;
             self.devices = Devices::open_selected(
                 self.muted.clone(),
                 self.deafened.clone(),
@@ -455,14 +492,18 @@ impl Media {
             .set_codec_preferences(codecs)
             .map_err(|_| "Не удалось выбрать видеокодек")?;
         let sender = transceiver.sender();
-        let loopback = if self.settings.screen.system_audio {
-            Some(Loopback::open(&self.settings.speaker)?)
+        let (loopback, own_audio_filter) = if self.settings.screen.system_audio {
+            let (capture, excluded) = SystemCapture::open(&self.settings.speaker)?;
+            (
+                Some(capture),
+                (!excluded).then(|| AudioProcessingModule::new(true, false, false, false)),
+            )
         } else {
-            None
+            (None, None)
         };
         let audio = loopback
             .as_ref()
-            .map(|_| NativeAudioSource::new(AudioSourceOptions::default(), 48000, 1, 0));
+            .map(|_| NativeAudioSource::new(AudioSourceOptions::default(), 48000, 2, 0));
         if let Some(audio) = &audio {
             conn.pc
                 .add_track(
@@ -506,6 +547,7 @@ impl Media {
             capture_stop: stop,
             _capture: capture,
             loopback,
+            own_audio_filter,
             audio,
             settings,
         });
@@ -548,8 +590,15 @@ impl Media {
         let mut levels = Vec::new();
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Signal(signal) => signals.push(signal),
-                Event::State(key, state) => {
+                Event::Signal(key, generation, signal) => {
+                    if self.is_current(&key, generation) {
+                        signals.push(signal);
+                    }
+                }
+                Event::State(key, generation, state) => {
+                    if !self.is_current(&key, generation) {
+                        continue;
+                    }
                     if key == "audio" && state == PeerConnectionState::Failed {
                         self.audio_failed = true;
                     }
@@ -564,8 +613,15 @@ impl Media {
                     self.stop_screen();
                     signals.push(envelope("screen-share-stop", json!({})));
                 }
-                Event::Track(key, event) => self.receive_track(key, event),
-                Event::Audio(key, mut samples) => {
+                Event::Track(key, generation, event) => {
+                    if self.is_current(&key, generation) {
+                        self.receive_track(key, generation, event);
+                    }
+                }
+                Event::Audio(key, connection_key, generation, mut samples) => {
+                    if !self.is_current(&connection_key, generation) {
+                        continue;
+                    }
                     let (peer, screen) = if let Some(id) = key.strip_prefix("screen:") {
                         (Some(id), true)
                     } else {
@@ -591,10 +647,19 @@ impl Media {
                         *s *= gain;
                     }
                     if peer.is_some() {
-                        self.mixer.push(key, &samples);
+                        self.mixer.push(key, &samples, if screen { 2 } else { 1 });
                     }
                 }
             }
+        }
+        while let Ok(samples) = self.reference.captured.try_recv() {
+            let mut pcm = [0i16; FRAME * 2];
+            for (to, from) in pcm.iter_mut().zip(samples) {
+                *to = (from.clamp(-1.0, 1.0) * 32767.0) as i16;
+            }
+            self.apm
+                .process_reverse_stream(&mut pcm, 48000, 2)
+                .map_err(|_| "Ошибка обработки эха")?;
         }
         while let Ok(mut captured) = self.devices.captured.try_recv() {
             let mut pcm = [0i16; FRAME];
@@ -639,17 +704,25 @@ impl Media {
         if let Some(p) = &mut self.publisher
             && let (Some(loopback), Some(audio)) = (&mut p.loopback, &p.audio)
         {
-            while let Ok(samples) = loopback.captured.try_recv() {
-                let pcm: Vec<i16> = samples
+            while let Ok(samples) = loopback.captured().try_recv() {
+                let mut pcm: Vec<i16> = samples
                     .iter()
                     .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
                     .collect();
-                for chunk in pcm.chunks(480) {
+                if let Some(filter) = &mut p.own_audio_filter {
+                    filter
+                        .set_stream_delay_ms(40)
+                        .map_err(|_| "Ошибка исключения своего звука")?;
+                    filter
+                        .process_stream(&mut pcm, 48000, 2)
+                        .map_err(|_| "Ошибка исключения своего звука")?;
+                }
+                for chunk in pcm.chunks(960) {
                     audio
                         .capture_frame(&AudioFrame {
                             data: Cow::Borrowed(chunk),
                             sample_rate: 48000,
-                            num_channels: 1,
+                            num_channels: 2,
                             samples_per_channel: 480,
                         })
                         .await
@@ -659,7 +732,7 @@ impl Media {
         }
         if self
             .devices
-            .playback
+            .stereo
             .lock()
             .map_err(|_| "Ошибка аудиовыхода")?
             .len()
@@ -671,17 +744,23 @@ impl Media {
             } else {
                 self.settings.output_volume as f32 / 100.0
             };
-            for s in &mut mixed {
-                *s = (*s * gain).clamp(-1.0, 1.0);
+            for frame in &mut mixed {
+                for sample in frame {
+                    *sample = (*sample * gain).clamp(-1.0, 1.0);
+                }
             }
-            let mut reverse = [0i16; FRAME];
-            for (to, from) in reverse.iter_mut().zip(mixed) {
-                *to = (from * 32767.0) as i16;
+            let mut reverse = [0i16; FRAME * 2];
+            for (to, from) in reverse.iter_mut().zip(mixed.iter().flatten()) {
+                *to = (*from * 32767.0) as i16;
             }
-            self.apm
-                .process_reverse_stream(&mut reverse, 48000, 1)
-                .map_err(|_| "Ошибка обработки эха")?;
-            if let Ok(mut queue) = self.devices.playback.lock() {
+            if let Some(publisher) = &mut self.publisher
+                && let Some(filter) = &mut publisher.own_audio_filter
+            {
+                filter
+                    .process_reverse_stream(&mut reverse, 48000, 2)
+                    .map_err(|_| "Ошибка исключения своего звука")?;
+            }
+            if let Ok(mut queue) = self.devices.stereo.lock() {
                 queue.extend(mixed);
                 if queue.len() > MAX_BUFFER {
                     let count = queue.len() - MAX_BUFFER;
@@ -695,6 +774,7 @@ impl Media {
                 || crate::device::selected_ids(&self.settings.microphone, &self.settings.speaker)
                     .is_some_and(|ids| ids != self.devices.ids)
             {
+                self.reference = Loopback::open(&self.settings.speaker)?;
                 self.devices = Devices::open_selected(
                     self.muted.clone(),
                     self.deafened.clone(),
@@ -705,7 +785,7 @@ impl Media {
         }
         Ok((signals, levels))
     }
-    fn receive_track(&mut self, key: String, event: TrackEvent) {
+    fn receive_track(&mut self, key: String, generation: u64, event: TrackEvent) {
         let handle = tokio::runtime::Handle::current();
         match event.track {
             MediaStreamTrack::Audio(track) => {
@@ -719,11 +799,22 @@ impl Media {
                         .unwrap_or_else(|| track.id())
                 };
                 let tx = self.tx.clone();
-                let mut stream = NativeAudioStream::new(track, 48000, 1);
+                let connection_key = key.clone();
+                let channels = if key.starts_with("screen-sub:") { 2 } else { 1 };
+                let mut stream = NativeAudioStream::new(track, 48000, channels);
                 let task = handle.spawn(async move {
                     while let Some(frame) = stream.next().await {
                         let samples = frame.data.iter().map(|s| *s as f32 / 32768.0).collect();
-                        if tx.send(Event::Audio(name.clone(), samples)).await.is_err() {
+                        if tx
+                            .send(Event::Audio(
+                                name.clone(),
+                                connection_key.clone(),
+                                generation,
+                                samples,
+                            ))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -777,23 +868,26 @@ fn connection(
     key: &str,
     tx: &mpsc::Sender<Event>,
 ) -> Result<Connection, String> {
+    static GENERATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let generation = GENERATIONS.fetch_add(1, Ordering::Relaxed);
     let pc = factory
         .create_peer_connection(config.clone())
         .map_err(|_| "Не удалось создать WebRTC")?;
     let sender = tx.clone();
     let candidate_key = key.to_owned();
-    pc.on_ice_candidate(Some(Box::new(move|candidate|{let mut data=json!({"pc":candidate_key.split(':').next().unwrap_or("audio"),"candidate":candidate.candidate(),"sdpMid":candidate.sdp_mid(),"sdpMLineIndex":candidate.sdp_mline_index()});if let Some(id)=candidate_key.strip_prefix("screen-sub:"){data["publisherId"]=id.into();}let _=sender.try_send(Event::Signal(envelope("candidate",data)));})));
+    pc.on_ice_candidate(Some(Box::new(move|candidate|{let mut data=json!({"pc":candidate_key.split(':').next().unwrap_or("audio"),"candidate":candidate.candidate(),"sdpMid":candidate.sdp_mid(),"sdpMLineIndex":candidate.sdp_mline_index()});if let Some(id)=candidate_key.strip_prefix("screen-sub:"){data["publisherId"]=id.into();}let _=sender.try_send(Event::Signal(candidate_key.clone(), generation, envelope("candidate",data)));})));
     let sender = tx.clone();
     let track_key = key.to_owned();
     pc.on_track(Some(Box::new(move |event| {
-        let _ = sender.try_send(Event::Track(track_key.clone(), event));
+        let _ = sender.try_send(Event::Track(track_key.clone(), generation, event));
     })));
     let sender = tx.clone();
     let state_key = key.to_owned();
     pc.on_connection_state_change(Some(Box::new(move |state| {
-        let _ = sender.try_send(Event::State(state_key.clone(), state));
+        let _ = sender.try_send(Event::State(state_key.clone(), generation, state));
     })));
     Ok(Connection {
+        generation,
         pc,
         remote_ready: false,
         candidates: vec![],

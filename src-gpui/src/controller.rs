@@ -99,9 +99,22 @@ pub enum Update {
         attachment: Attachment,
         path: Option<PathBuf>,
     },
+    FileFailed {
+        upload_id: String,
+        error: String,
+    },
 }
 
 enum Job {
+    Connected {
+        generation: u64,
+        scope: Scope,
+        result: Box<Result<(Socket, crate::protocol::ServerConfig), String>>,
+    },
+    Version {
+        server: String,
+        result: Result<String, String>,
+    },
     UploadProgress {
         scope: Scope,
         id: String,
@@ -192,6 +205,8 @@ struct Worker {
     uploads: BTreeMap<String, Upload>,
     pings: PingLimiter,
     levels: BTreeMap<String, (bool, std::time::Instant)>,
+    connect_job: Option<tokio::task::JoinHandle<()>>,
+    connect_generation: u64,
     reconnect: usize,
     reconnect_at: tokio::time::Instant,
 }
@@ -234,6 +249,8 @@ impl Worker {
             uploads: BTreeMap::new(),
             pings: PingLimiter::default(),
             levels: BTreeMap::new(),
+            connect_job: None,
+            connect_generation: 0,
             reconnect: 0,
             reconnect_at: tokio::time::Instant::now(),
         }
@@ -285,9 +302,10 @@ impl Worker {
                         _=>{},
                     }
                 },
-                _=tokio::time::sleep_until(self.reconnect_at),if self.api.is_some()&&self.socket.is_none()=>{
-                    let result=tokio::select!{_=stop.cancelled()=>break,result=self.open_socket()=>result};
-                    if let Err(e)=result{let expired=e.starts_with("Сессия истекла");self.error(e).await;if expired{self.clear().await;}else{self.disconnected();}}self.emit().await;
+                _=tokio::time::sleep_until(self.reconnect_at),if self.api.is_some()&&self.socket.is_none()&&self.connect_job.is_none()=>{
+                    self.connect_generation+=1;let generation=self.connect_generation;let scope=self.scope();let api=self.api.clone().expect("authenticated");let room=self.state.settings.room.clone();let jobs=self.jobs.clone();
+                    self.connect_job=Some(tokio::spawn(async move{let result=Self::prepare_socket(api,room).await;let _=jobs.send(Job::Connected{generation,scope,result:Box::new(result)}).await;}));
+                    self.state.status="Подключение…".into();self.emit().await;
                 },
                 _=tick.tick(),if self.media.is_some()=>{
                     let result=self.media.as_mut().expect("media").tick().await;
@@ -308,7 +326,7 @@ impl Worker {
                 Some(job)=self.results.recv()=>{let progress_only=matches!(&job,Job::UploadProgress{..});if let Err(e)=self.job(job).await{self.error(e).await;}
                 if !progress_only{self.emit().await;}},
                 Some((event,data))=self.presence_events.recv()=>{self.presence_event(&event,data);self.emit().await;},
-                _=versions.tick(),if self.api.is_some()=>{if let Some(api)=&self.api&& let Ok(version)=api.version().await{self.state.version=version;self.emit().await;}},
+                _=versions.tick(),if self.api.is_some()=>{let api=self.api.clone().expect("authenticated");let server=self.state.settings.server.clone();let jobs=self.jobs.clone();tokio::spawn(async move{let result=api.version().await;let _=jobs.send(Job::Version{server,result}).await;});},
             }
         }
         self.presence_stop.cancel();
@@ -367,12 +385,20 @@ impl Worker {
         Ok(())
     }
     async fn close_socket(&mut self) {
+        if let Some(job) = self.connect_job.take() {
+            job.abort();
+        }
+        self.connect_generation += 1;
         if let Some(mut socket) = self.socket.take() {
             let _ = tokio::time::timeout(Duration::from_secs(1), socket.close(None)).await;
         }
         self.state.connected = false;
     }
     fn disconnected(&mut self) {
+        if let Some(job) = self.connect_job.take() {
+            job.abort();
+        }
+        self.connect_generation += 1;
         self.socket = None;
         self.state.connected = false;
         let delays = [1, 2, 4, 8, 15, 30, 30];
@@ -381,24 +407,12 @@ impl Worker {
         self.reconnect_at = tokio::time::Instant::now() + Duration::from_secs(seconds);
         self.state.status = format!("Соединение потеряно · повтор через {seconds} с");
     }
-    async fn open_socket(&mut self) -> Result<(), String> {
-        let api = self.api.as_ref().ok_or("Войдите на сервер")?;
-        let config = api.config().await?;
-        self.state.role = config.role.clone();
-        if self.state.settings.voice_active {
-            if self.media.is_none() {
-                self.media = Some(Media::new(
-                    &config,
-                    self.state.settings.clone(),
-                    self.frames.clone(),
-                )?);
-            } else if let Some(media) = &mut self.media {
-                media.reset_audio(&config)?;
-            }
-        } else {
-            self.media = None;
-        }
-        let ws = ws_url(&api.server, &self.state.settings.room)?;
+    async fn prepare_socket(
+        api: Api,
+        room: String,
+    ) -> Result<(Socket, crate::protocol::ServerConfig), String> {
+        let server_config = api.config().await?;
+        let ws = ws_url(&api.server, &room)?;
         let mut request = ws
             .as_str()
             .into_client_request()
@@ -410,17 +424,14 @@ impl Worker {
         let mut config = WebSocketConfig::default();
         config.max_message_size = Some(256 * 1024);
         config.max_frame_size = Some(256 * 1024);
-        let (mut socket, _) = tokio::time::timeout(
+        let (socket, _) = tokio::time::timeout(
             Duration::from_secs(15),
             tokio_tungstenite::connect_async_with_config(request, Some(config), false),
         )
         .await
         .map_err(|_| "Сервер не ответил")?
         .map_err(|_| "Не удалось подключиться к комнате")?;
-        socket.send(WsMessage::Text(envelope("hello",json!({"displayName":self.state.settings.name,"clientId":self.state.settings.client_id,"chatOnly":!self.state.settings.voice_active})).into())).await.map_err(|_|"Соединение прервано")?;
-        self.socket = Some(socket);
-        self.state.status = "Подключение…".into();
-        Ok(())
+        Ok((socket, server_config))
     }
     async fn send(&mut self, text: String) -> Result<(), String> {
         let Some(socket) = &mut self.socket else {
@@ -436,7 +447,14 @@ impl Worker {
         match action {
             Action::Login { server, password } => {
                 self.clear().await;
-                let api = Api::login(&server, password).await?;
+                let api = if password.is_empty() {
+                    match Api::restore(&server).await? {
+                        Some(api) => api,
+                        None => Api::login(&server, password).await?,
+                    }
+                } else {
+                    Api::login(&server, password).await?
+                };
                 self.authenticated(api).await
             }
             Action::Restore => {
@@ -465,6 +483,10 @@ impl Worker {
                     media.configure(*settings.clone())?;
                 }
                 self.state.settings = *settings;
+                if let Some(peer) = self.state.peers.get_mut(&self.state.self_id) {
+                    peer.self_muted = self.state.settings.muted;
+                    peer.deafened = self.state.settings.deafened;
+                }
                 self.state.settings.save(&self.storage)?;
                 if self.state.connected && self.state.settings.voice_active {
                     self.send(envelope("set-state",json!({"selfMuted":self.state.settings.muted,"deafened":self.state.settings.deafened}))).await?;
@@ -503,6 +525,9 @@ impl Worker {
                     return Err("Имя должно содержать от 1 до 64 символов".into());
                 }
                 self.state.settings.name = name.into();
+                if let Some(peer) = self.state.peers.get_mut(&self.state.self_id) {
+                    peer.display_name = name.into();
+                }
                 self.state.settings.save(&self.storage)?;
                 if self.state.settings.voice_active {
                     self.send(envelope("set-displayname", json!({"displayName":name})))
@@ -920,6 +945,62 @@ impl Worker {
     }
     async fn job(&mut self, job: Job) -> Result<(), String> {
         match job {
+            Job::Connected {
+                generation,
+                scope,
+                result,
+            } => {
+                if generation != self.connect_generation || scope != self.scope() {
+                    return Ok(());
+                }
+                self.connect_job = None;
+                let (socket, config) = match *result {
+                    Ok(connected) => connected,
+                    Err(error) => {
+                        if error.starts_with("Сессия истекла") {
+                            self.clear().await;
+                        } else {
+                            self.disconnected();
+                        }
+                        return Err(error);
+                    }
+                };
+                self.state.role = config.role.clone();
+                if self.state.settings.voice_active {
+                    let result = if let Some(media) = &mut self.media {
+                        media.reset_audio(&config)
+                    } else {
+                        match Media::new(&config, self.state.settings.clone(), self.frames.clone())
+                        {
+                            Ok(media) => {
+                                self.media = Some(media);
+                                Ok(())
+                            }
+                            Err(error) => Err(error),
+                        }
+                    };
+                    if let Err(error) = result {
+                        self.media = None;
+                        self.state.settings.voice_active = false;
+                        self.state.settings.save(&self.storage)?;
+                        self.disconnected();
+                        self.reconnect_at = tokio::time::Instant::now();
+                        return Err(error);
+                    }
+                } else {
+                    self.media = None;
+                }
+                self.socket = Some(socket);
+                self.send(envelope("hello",json!({"displayName":self.state.settings.name,"clientId":self.state.settings.client_id,"chatOnly":!self.state.settings.voice_active}))).await
+            }
+            Job::Version { server, result } => {
+                if server == self.state.settings.server
+                    && let Ok(version) = result
+                {
+                    self.state.version = version;
+                }
+                Ok(())
+            }
             Job::UploadProgress {
                 scope,
                 id,
@@ -978,13 +1059,14 @@ impl Worker {
                     return Ok(());
                 }
                 self.trim_cache()?;
-                let _ = self
-                    .tx
-                    .send(Update::File {
-                        attachment,
-                        path: result?,
-                    })
-                    .await;
+                let update = match result {
+                    Ok(path) => Update::File { attachment, path },
+                    Err(error) => Update::FileFailed {
+                        upload_id: attachment.upload_id,
+                        error,
+                    },
+                };
+                let _ = self.tx.send(update).await;
                 Ok(())
             }
             Job::Admin(scope, result) => {

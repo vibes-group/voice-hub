@@ -64,6 +64,44 @@ pub enum Hotkey {
     Mouse(u8),
 }
 
+impl Hotkey {
+    pub fn label(&self) -> String {
+        match self {
+            Self::Mouse(2) => "Правая кнопка мыши".into(),
+            Self::Mouse(3) => "Средняя кнопка мыши".into(),
+            Self::Mouse(number) => format!("Боковая кнопка мыши {number}"),
+            Self::Keyboard {
+                key,
+                ctrl,
+                shift,
+                alt,
+                meta,
+            } => {
+                let mut parts = Vec::new();
+                for (enabled, label) in [
+                    (*ctrl, "Ctrl"),
+                    (*shift, "Shift"),
+                    (*alt, "Alt"),
+                    (*meta, "Win"),
+                ] {
+                    if enabled {
+                        parts.push(label.to_owned());
+                    }
+                }
+                if !key.is_empty() {
+                    parts.push(
+                        key.strip_prefix("Key")
+                            .or_else(|| key.strip_prefix("Num"))
+                            .unwrap_or(key)
+                            .to_owned(),
+                    );
+                }
+                parts.join(" + ")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScreenSettings {

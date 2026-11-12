@@ -106,7 +106,23 @@ impl History {
         }
     }
     pub fn delete(&mut self, id: &str) {
+        let removed = self
+            .messages
+            .iter()
+            .filter(|m| m.id == id)
+            .flat_map(|m| m.attachments.iter().map(|a| a.upload_id.clone()))
+            .collect::<BTreeSet<_>>();
         self.messages.retain(|m| m.id != id);
+        let kept = self
+            .messages
+            .iter()
+            .flat_map(|m| m.attachments.iter().map(|a| a.upload_id.clone()))
+            .collect::<BTreeSet<_>>();
+        if let Ok(cache) = BlobCache::new(&self.storage, &self.server) {
+            for id in removed.difference(&kept) {
+                let _ = cache.delete(id);
+            }
+        }
     }
     pub fn mark_deleted(&mut self, ids: &BTreeSet<String>) {
         for m in &mut self.messages {

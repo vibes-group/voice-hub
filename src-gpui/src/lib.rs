@@ -9,10 +9,11 @@ pub mod denoise;
 pub mod media;
 pub mod player;
 pub mod protocol;
-pub mod session;
 pub mod settings;
 pub mod system;
 pub mod updater;
 
 #[cfg(feature = "desktop")]
 pub mod device;
+#[cfg(all(feature = "desktop", target_os = "windows"))]
+pub mod process_audio;

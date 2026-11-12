@@ -9,21 +9,19 @@ use tokio::sync::mpsc;
 use crate::audio::{FRAME, MAX_BUFFER, SAMPLE_RATE};
 
 pub type Playback = Arc<Mutex<VecDeque<f32>>>;
+pub type StereoPlayback = Arc<Mutex<VecDeque<[f32; 2]>>>;
 
 pub struct Devices {
     _input: cpal::Stream,
     _output: cpal::Stream,
     pub captured: mpsc::Receiver<[f32; FRAME]>,
     pub playback: Playback,
+    pub stereo: StereoPlayback,
     pub failed: Arc<AtomicBool>,
     pub ids: (String, String),
 }
 
 impl Devices {
-    pub fn open(muted: Arc<AtomicBool>, deafened: Arc<AtomicBool>) -> Result<Self, String> {
-        Self::open_selected(muted, deafened, "", "")
-    }
-
     pub fn open_selected(
         muted: Arc<AtomicBool>,
         deafened: Arc<AtomicBool>,
@@ -47,6 +45,7 @@ impl Devices {
         let (tx, captured) = mpsc::channel(3);
         let playback = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER)));
         let failed = Arc::new(AtomicBool::new(false));
+        let stereo = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER)));
         macro_rules! input_stream {
             ($ty:ty) => {
                 capture::<$ty>(&input, input_config.config(), tx, muted, failed.clone())
@@ -65,10 +64,11 @@ impl Devices {
         }?;
         macro_rules! output_stream {
             ($ty:ty) => {
-                play::<$ty>(
+                play_stereo::<$ty>(
                     &output,
                     output_config.config(),
                     playback.clone(),
+                    stereo.clone(),
                     deafened,
                     failed.clone(),
                 )
@@ -94,6 +94,7 @@ impl Devices {
             _output: output,
             captured,
             playback,
+            stereo,
             failed,
             ids,
         })
@@ -151,51 +152,6 @@ where
         .map_err(|_| "Не удалось открыть микрофон".into())
 }
 
-fn play<T>(
-    device: &cpal::Device,
-    config: StreamConfig,
-    playback: Playback,
-    deafened: Arc<AtomicBool>,
-    failed: Arc<AtomicBool>,
-) -> Result<cpal::Stream, String>
-where
-    T: SizedSample + FromSample<f32>,
-{
-    let channels = config.channels as usize;
-    let ratio = SAMPLE_RATE as f64 / config.sample_rate as f64;
-    let mut phase = 0.0;
-    let mut previous = 0.0_f32;
-    let mut next = 0.0_f32;
-    device
-        .build_output_stream(
-            config,
-            move |data: &mut [T], _| {
-                data.fill(T::EQUILIBRIUM);
-                if let Ok(mut queue) = playback.try_lock() {
-                    if deafened.load(Ordering::Relaxed) {
-                        queue.clear();
-                        return;
-                    }
-                    for frame in data.chunks_exact_mut(channels) {
-                        while phase >= 1.0 {
-                            previous = next;
-                            next = queue.pop_front().unwrap_or(0.0);
-                            phase -= 1.0;
-                        }
-                        let sample = previous + (next - previous) * phase as f32;
-                        frame.fill(T::from_sample(sample));
-                        phase += ratio;
-                    }
-                }
-            },
-            move |_| {
-                failed.store(true, Ordering::Relaxed);
-            },
-            None,
-        )
-        .map_err(|_| "Не удалось открыть устройство воспроизведения".into())
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AudioDevice {
     pub id: String,
@@ -245,7 +201,7 @@ fn selected(host: &cpal::Host, id: &str, input: bool) -> Option<cpal::Device> {
 #[cfg(target_os = "windows")]
 pub struct Loopback {
     _stream: cpal::Stream,
-    pub captured: mpsc::Receiver<[f32; FRAME]>,
+    pub captured: mpsc::Receiver<[f32; FRAME * 2]>,
 }
 #[cfg(target_os = "windows")]
 impl Loopback {
@@ -256,11 +212,12 @@ impl Loopback {
             .default_output_config()
             .map_err(|_| "Не удалось прочитать параметры системного аудио")?;
         let (tx, captured) = mpsc::channel(3);
-        let muted = Arc::new(AtomicBool::new(false));
-        let failed = Arc::new(AtomicBool::new(false));
+        if config.sample_rate() < 8000 {
+            return Err("Неподдерживаемая частота системного звука".into());
+        }
         macro_rules! stream {
             ($ty:ty) => {
-                capture::<$ty>(&device, config.config(), tx, muted, failed)
+                capture_stereo::<$ty>(&device, config.config(), tx)
             };
         }
         let stream = match config.sample_format() {
@@ -374,7 +331,7 @@ pub fn feedback(speaker: String, kind: Feedback) {
 
 pub struct AudioOutput {
     _stream: cpal::Stream,
-    pub playback: Playback,
+    pub playback: StereoPlayback,
 }
 impl AudioOutput {
     pub fn open(speaker: &str) -> Result<Self, String> {
@@ -384,11 +341,19 @@ impl AudioOutput {
             .default_output_config()
             .map_err(|_| "Не удалось прочитать параметры аудиовыхода")?;
         let playback = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER)));
+        let mono = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER)));
         let deafened = Arc::new(AtomicBool::new(false));
         let failed = Arc::new(AtomicBool::new(false));
         macro_rules! stream {
             ($ty:ty) => {
-                play::<$ty>(&device, config.config(), playback.clone(), deafened, failed)
+                play_stereo::<$ty>(
+                    &device,
+                    config.config(),
+                    mono.clone(),
+                    playback.clone(),
+                    deafened,
+                    failed,
+                )
             };
         }
         let stream = match config.sample_format() {
@@ -406,4 +371,107 @@ impl AudioOutput {
             playback,
         })
     }
+}
+
+#[cfg(target_os = "windows")]
+fn capture_stereo<T>(
+    device: &cpal::Device,
+    config: StreamConfig,
+    tx: mpsc::Sender<[f32; FRAME * 2]>,
+) -> Result<cpal::Stream, String>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let channels = config.channels as usize;
+    let mut left = crate::audio::Resampler::new(config.sample_rate, SAMPLE_RATE);
+    let mut right = crate::audio::Resampler::new(config.sample_rate, SAMPLE_RATE);
+    let mut frame = [0.0; FRAME * 2];
+    let mut offset = 0;
+    device
+        .build_input_stream(
+            config,
+            move |data: &[T], _| {
+                for source in data.chunks_exact(channels) {
+                    let l = source[0].to_sample::<f32>();
+                    let r = source[if channels > 1 { 1 } else { 0 }].to_sample::<f32>();
+                    let mut converted = [0.0; 16];
+                    let mut count = 0;
+                    left.push(l, |sample| {
+                        converted[count] = sample;
+                        count += 1;
+                    });
+                    let mut index = 0;
+                    right.push(r, |sample| {
+                        frame[offset * 2] = converted[index];
+                        frame[offset * 2 + 1] = sample;
+                        index += 1;
+                        offset += 1;
+                        if offset == FRAME {
+                            let _ = tx.try_send(frame);
+                            offset = 0;
+                        }
+                    });
+                }
+            },
+            |_| {},
+            None,
+        )
+        .map_err(|_| "Не удалось открыть системный звук".into())
+}
+fn play_stereo<T>(
+    device: &cpal::Device,
+    config: StreamConfig,
+    mono: Playback,
+    stereo: StereoPlayback,
+    deafened: Arc<AtomicBool>,
+    failed: Arc<AtomicBool>,
+) -> Result<cpal::Stream, String>
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let channels = config.channels as usize;
+    let ratio = SAMPLE_RATE as f64 / config.sample_rate as f64;
+    let mut phase = 1.0;
+    let mut previous = [0.0f32; 2];
+    let mut next = [0.0f32; 2];
+    device
+        .build_output_stream(
+            config,
+            move |data: &mut [T], _| {
+                data.fill(T::EQUILIBRIUM);
+                if let (Ok(mut mono), Ok(mut stereo)) = (mono.try_lock(), stereo.try_lock()) {
+                    if deafened.load(Ordering::Relaxed) {
+                        mono.clear();
+                        stereo.clear();
+                        previous = [0.0; 2];
+                        next = [0.0; 2];
+                        return;
+                    }
+                    for frame in data.chunks_exact_mut(channels) {
+                        while phase >= 1.0 {
+                            previous = next;
+                            next = stereo
+                                .pop_front()
+                                .unwrap_or_else(|| [mono.pop_front().unwrap_or(0.0); 2]);
+                            phase -= 1.0;
+                        }
+                        let l = previous[0] + (next[0] - previous[0]) * phase as f32;
+                        let r = previous[1] + (next[1] - previous[1]) * phase as f32;
+                        if channels == 1 {
+                            frame[0] = T::from_sample((l + r) * 0.5);
+                        } else {
+                            frame[0] = T::from_sample(l);
+                            frame[1] = T::from_sample(r);
+                        }
+                        phase += ratio;
+                    }
+                }
+            },
+            move |_| {
+                failed.store(true, Ordering::Relaxed);
+            },
+            None,
+        )
+        .map_err(|_| "Не удалось открыть стереовыход".into())
 }

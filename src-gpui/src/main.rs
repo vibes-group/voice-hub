@@ -137,6 +137,12 @@ impl Client {
                 while let Some(frame) = frames.recv().await {
                     if entity
                         .update(cx, |this, cx| {
+                            if (frame.publisher == "self" && !this.state.publishing)
+                                || (frame.publisher != "self"
+                                    && !this.state.watching.contains(&frame.publisher))
+                            {
+                                return;
+                            }
                             if let Some(buffer) = image::RgbaImage::from_raw(
                                 frame.width,
                                 frame.height,
@@ -162,6 +168,7 @@ impl Client {
         let compose = cx.new(|cx| Input::new("", false, cx).multiline());
         let subscriptions = vec![
             cx.observe_window_activation(window, |this, window, _| {
+                this.system.set_focused(window.is_window_active());
                 if window.is_window_active() {
                     System::flash(false);
                     let _ = this.updater.actions.try_send(UpdateAction::Check {
@@ -309,7 +316,18 @@ impl Client {
                 if self.state.settings.ping_flash {
                     System::flash(true);
                 }
-                self.toast = Some((format!("{name} зовёт вас"), Instant::now()));
+                let at = Instant::now();
+                self.toast = Some((format!("{name} зовёт вас"), at));
+                cx.spawn(async move |entity, cx| {
+                    cx.background_executor().timer(Duration::from_secs(8)).await;
+                    let _ = entity.update(cx, |this, cx| {
+                        if this.toast.as_ref().is_some_and(|(_, time)| *time == at) {
+                            this.toast = None;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
             }
             Update::Levels(levels) => {
                 for (id, speaking) in levels {
@@ -337,6 +355,20 @@ impl Client {
             }
             Update::Passwords(entries) => self.passwords = entries,
             Update::Password(password) => self.created_password = Some(password),
+            Update::FileFailed { upload_id, error } => {
+                self.loading.remove(&upload_id);
+                self.images.insert(upload_id.clone(), None);
+                self.error = Some(error);
+                if self
+                    .playing
+                    .as_ref()
+                    .is_some_and(|a| a.upload_id == upload_id)
+                {
+                    self.player = None;
+                    self.playing = None;
+                    self.player_frame = None;
+                }
+            }
             Update::File { attachment, path } => {
                 self.loading.remove(&attachment.upload_id);
                 if self
@@ -389,7 +421,10 @@ impl Client {
                                                         }
                                                     }
                                                     PlayerEvent::Error(error) => {
-                                                        this.error = Some(error)
+                                                        this.error = Some(error);
+                                                        this.player = None;
+                                                        this.playing = None;
+                                                        this.player_frame = None;
                                                     }
                                                 }
                                                 cx.notify();
@@ -550,6 +585,9 @@ impl Client {
         }
     }
     fn login(&mut self, cx: &mut Context<Self>) {
+        if self.state.status == "Вход…" {
+            return;
+        }
         let server = self.server.read(cx).text.clone();
         if let Err(error) = voice_hub_gpui_beta::protocol::server_url(&server) {
             self.error = Some(error);
@@ -832,14 +870,18 @@ fn main() {
             move |window, cx| {
                 #[cfg(target_os = "windows")]
                 window.on_window_should_close(cx, |_, _| {
-                    System::hide();
-                    false
+                    if System::can_hide() {
+                        System::hide();
+                        false
+                    } else {
+                        true
+                    }
                 });
                 cx.new(|cx| Client::new(system, system_events, window, cx))
             },
         )
         .expect("open GPUI window");
-        if std::env::args().any(|arg| arg == "--hidden") {
+        if std::env::args().any(|arg| arg == "--hidden") && System::can_hide() {
             System::hide();
         } else {
             cx.activate(true);
