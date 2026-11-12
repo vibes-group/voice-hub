@@ -356,10 +356,14 @@ struct DesktopPlatform {
     url: String,
 }
 
-fn read_manifest(dir: &std::path::Path) -> Option<DesktopManifest> {
-    let data = std::fs::read(dir.join("latest.json")).ok()?;
+fn read_named_manifest(dir: &std::path::Path, name: &str) -> Option<DesktopManifest> {
+    let data = std::fs::read(dir.join(name)).ok()?;
     let m: DesktopManifest = serde_json::from_slice(&data).ok()?;
     (!m.version.is_empty() && !m.platforms.is_empty()).then_some(m)
+}
+
+fn read_manifest(dir: &std::path::Path) -> Option<DesktopManifest> {
+    read_named_manifest(dir, "latest.json")
 }
 
 /// path.Base of the URL's (decoded) path; rejects empty, "." and "/".
@@ -392,7 +396,15 @@ fn request_origin(req: &Req) -> String {
 /// Mirrored Tauri manifest with artifact URLs rewritten to this request's
 /// host, so a desktop client downloads from the server it is configured for.
 pub fn desktop_manifest(app: &App, req: &Req) -> Resp {
-    let Some(mut m) = read_manifest(&app.cfg.updates_dir) else {
+    desktop_manifest_named(app, req, "latest.json")
+}
+
+pub fn gpui_manifest(app: &App, req: &Req) -> Resp {
+    desktop_manifest_named(app, req, "gpui-latest.json")
+}
+
+fn desktop_manifest_named(app: &App, req: &Req, name: &str) -> Resp {
+    let Some(mut m) = read_named_manifest(&app.cfg.updates_dir, name) else {
         return not_found();
     };
     let origin = request_origin(req);

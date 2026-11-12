@@ -7,6 +7,7 @@ on:
       - 'src-tauri/**'
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
+      - 'scripts/prepare-webrtc.py'
       - '.github/workflows/release-desktop.yml'
   workflow_dispatch:
 

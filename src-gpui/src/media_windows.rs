@@ -830,7 +830,7 @@ fn start_capture(
     frames: mpsc::Sender<VideoImage>,
 ) -> Result<std::thread::JoinHandle<()>, String> {
     // Desktop capture has thread affinity. Create, select, capture and destroy on one thread.
-    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
     let thread = std::thread::spawn(move || {
         let mut options = DesktopCapturerOptions::new(if choice.window {
             DesktopCaptureSourceType::Window

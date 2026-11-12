@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
+use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig};
 use tokio::sync::mpsc;
 
 use crate::audio::{FRAME, MAX_BUFFER, SAMPLE_RATE};
@@ -264,4 +264,96 @@ impl Loopback {
             captured,
         })
     }
+}
+
+#[derive(Clone, Copy)]
+pub enum Feedback {
+    Mute,
+    Unmute,
+    Ping,
+}
+pub fn feedback(speaker: String, kind: Feedback) {
+    std::thread::spawn(move || {
+        let host = cpal::default_host();
+        let Some(device) = selected(&host, &speaker, false) else {
+            return;
+        };
+        let Ok(config) = device.default_output_config() else {
+            return;
+        };
+        let rate = config.sample_rate() as f32;
+        let duration = if matches!(kind, Feedback::Ping) {
+            0.44
+        } else {
+            0.14
+        };
+        let samples = (rate * duration) as usize;
+        let channels = config.channels() as usize;
+        let mut position = 0usize;
+        let mut phase = 0.0_f32;
+        macro_rules! stream {
+            ($ty:ty) => {
+                device.build_output_stream(
+                    config.config(),
+                    move |data: &mut [$ty], _| {
+                        for frame in data.chunks_exact_mut(channels) {
+                            let t = position as f32 / rate;
+                            let sample = if position >= samples {
+                                0.0
+                            } else {
+                                match kind {
+                                    Feedback::Ping => {
+                                        let env = if t < 0.008 {
+                                            t / 0.008
+                                        } else {
+                                            (-20.0 * (t - 0.008)).exp()
+                                        };
+                                        env * (0.28 * (t * 587.0 * std::f32::consts::TAU).sin()
+                                            + 0.18 * (t * 880.0 * std::f32::consts::TAU).sin())
+                                    }
+                                    Feedback::Mute | Feedback::Unmute => {
+                                        let x = (t / 0.12).min(1.0);
+                                        let (from, to, peak) = if matches!(kind, Feedback::Mute) {
+                                            (520.0_f32, 300.0_f32, 0.2)
+                                        } else {
+                                            (392.0, 880.0, 0.16)
+                                        };
+                                        let frequency = from * (to / from).powf(x);
+                                        phase += frequency / rate;
+                                        let wave = if matches!(kind, Feedback::Mute) {
+                                            4.0 * (phase - phase.floor() - 0.5).abs() - 1.0
+                                        } else {
+                                            (phase * std::f32::consts::TAU).sin()
+                                        };
+                                        let env = if t < 0.005 {
+                                            t / 0.005
+                                        } else {
+                                            (1.0 - x).max(0.0)
+                                        };
+                                        wave * env * peak
+                                    }
+                                }
+                            };
+                            frame.fill(<$ty>::from_sample(sample));
+                            position += 1;
+                        }
+                    },
+                    |_| {},
+                    None,
+                )
+            };
+        }
+        let stream = match config.sample_format() {
+            SampleFormat::F32 => stream!(f32),
+            SampleFormat::I16 => stream!(i16),
+            SampleFormat::U16 => stream!(u16),
+            SampleFormat::I32 => stream!(i32),
+            _ => return,
+        };
+        if let Ok(stream) = stream
+            && stream.play().is_ok()
+        {
+            std::thread::sleep(std::time::Duration::from_secs_f32(duration + 0.05));
+        }
+    });
 }

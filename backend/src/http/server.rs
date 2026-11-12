@@ -143,6 +143,7 @@ async fn route(app: Arc<App>, mut req: Req, peer: SocketAddr) -> Resp {
 
     match segs.as_slice() {
         ["desktop", "latest.json"] if get => return handlers::desktop_manifest(&app, &req),
+        ["desktop", "gpui-latest.json"] if get => return handlers::gpui_manifest(&app, &req),
         ["desktop", "download", "windows"] if get => return handlers::desktop_download_windows(&app, req.method()),
         ["desktop", "files", name] if get && !name.is_empty() => {
             let name = param(name);

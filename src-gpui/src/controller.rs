@@ -435,11 +435,23 @@ impl Worker {
                 Ok(())
             }
             Action::Configure(settings) => {
+                let previous_mode = self.state.settings.screen.mode.clone();
                 if let Some(media) = &mut self.media {
                     media.configure(*settings.clone())?;
                 }
                 self.state.settings = *settings;
-                self.state.settings.save(&self.storage)
+                self.state.settings.save(&self.storage)?;
+                if self.state.connected && self.state.settings.voice_active {
+                    self.send(envelope("set-state",json!({"selfMuted":self.state.settings.muted,"deafened":self.state.settings.deafened}))).await?;
+                    if self.state.publishing && previous_mode != self.state.settings.screen.mode {
+                        self.send(envelope(
+                            "screen-share-mode-change",
+                            json!({"mode":self.state.settings.screen.mode}),
+                        ))
+                        .await?;
+                    }
+                }
+                Ok(())
             }
             Action::Voice(active) => {
                 self.state.settings.voice_active = active;

@@ -5,7 +5,7 @@ use gpui::{prelude::*, *};
 actions!(
     input,
     [
-        Backspace, Delete, Left, Right, SelectAll, Home, End, Paste, Copy, Cut
+        Backspace, Delete, Left, Right, SelectAll, Home, End, Paste, Copy, Cut, Submit
     ]
 );
 
@@ -25,6 +25,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-v", Paste, Some("Input")),
         KeyBinding::new("cmd-c", Copy, Some("Input")),
         KeyBinding::new("cmd-x", Cut, Some("Input")),
+        KeyBinding::new("enter", Submit, Some("Input")),
     ]);
 }
 
@@ -36,6 +37,12 @@ pub struct Input {
     marked: Option<Range<usize>>,
     bounds: Option<Bounds<Pixels>>,
 }
+
+pub enum InputEvent {
+    Submit,
+    PasteImage(gpui::Image),
+}
+impl EventEmitter<InputEvent> for Input {}
 
 impl Input {
     pub fn new(text: &str, secret: bool, cx: &mut Context<Self>) -> Self {
@@ -54,6 +61,16 @@ impl Input {
         self.selection = 0..0;
         self.marked = None;
         cx.notify();
+    }
+
+    pub fn set(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.text = text.into();
+        self.selection = text.len()..text.len();
+        self.marked = None;
+        cx.notify();
+    }
+    fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
+        cx.emit(InputEvent::Submit);
     }
 
     fn byte_offset(&self, utf16: usize) -> usize {
@@ -138,8 +155,15 @@ impl Input {
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.replace_text_in_range(None, &text, window, cx);
+        if let Some(item) = cx.read_from_clipboard() {
+            if let Some(image) = item.entries().iter().find_map(|entry| match entry {
+                ClipboardEntry::Image(image) => Some(image.clone()),
+                _ => None,
+            }) {
+                cx.emit(InputEvent::PasteImage(image));
+            } else if let Some(text) = item.text() {
+                self.replace_text_in_range(None, &text, window, cx);
+            }
         }
     }
 
@@ -313,6 +337,7 @@ impl Render for Input {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::submit))
             .child(
                 canvas(
                     |_, _, _| (),

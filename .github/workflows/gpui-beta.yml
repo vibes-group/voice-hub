@@ -35,6 +35,12 @@ jobs:
         run: python scripts/check-cargo-age.py src-gpui/Cargo.lock
       - name: Prepare verified native WebRTC SDK
         run: python scripts/prepare-webrtc.py --platform windows-x86_64 --github-env "$env:GITHUB_ENV"
+      # CI caches never enter the signing/release job.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-gpui
+          shared-key: gpui-checks
+          cache-on-failure: true
       - name: Find DirectX shader compiler
         shell: pwsh
         run: |
@@ -45,11 +51,13 @@ jobs:
       - name: Check and test GPUI beta
         working-directory: src-gpui
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo fmt --check
-          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo test --locked --workspace
       - name: Build release binary
         working-directory: src-gpui
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo build --locked --release
           cargo test --locked --release -p grid@0.18.0

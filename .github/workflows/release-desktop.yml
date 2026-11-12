@@ -103,7 +103,7 @@ jobs:
             echo "**Windows:** [\`${INSTALLER}\`](${INSTALLER_URL})"
             echo
             echo "**GPUI beta (Windows, portable):** [\`Voice-Hub-GPUI-Beta_${TAG}_windows-x86_64.zip\`](https://github.com/${REPO}/releases/download/${TAG}/Voice-Hub-GPUI-Beta_${TAG}_windows-x86_64.zip)"
-            echo 'Native voice preview: default audio devices at 48 kHz, IPv4/direct UDP, mute/deafen. Use headphones; no echo cancellation, noise suppression, screen sharing, chat, tray or auto-update.'
+            echo 'Native GPUI client: voice with TURN, echo/noise processing, screen sharing, chat and attachments, participant controls, administration, tray, hotkeys and signed updates.'
             echo
             if [ -n "$feats"  ]; then echo '## Features';    echo "$feats";  echo; fi
             if [ -n "$fixes"  ]; then echo '## Fixes';       echo "$fixes";  echo; fi
@@ -148,6 +148,9 @@ jobs:
       - name: Check dependency release ages
         run: python scripts/check-cargo-age.py src-gpui/Cargo.lock
 
+      - name: Prepare verified native WebRTC SDK
+        run: python scripts/prepare-webrtc.py --platform windows-x86_64 --github-env "$env:GITHUB_ENV"
+
       - name: Find DirectX shader compiler
         shell: pwsh
         run: |
@@ -159,8 +162,9 @@ jobs:
       - name: Check and test GPUI beta
         working-directory: src-gpui
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo fmt --check
-          cargo clippy --locked --all-targets --target $env:DESKTOP_TARGET -- -D warnings
+          cargo clippy --locked --workspace --all-targets --target $env:DESKTOP_TARGET -- -D warnings
           cargo test --locked --workspace --target $env:DESKTOP_TARGET
 
       - name: Build GPUI beta
@@ -168,8 +172,31 @@ jobs:
         env:
           APP_RELEASE_VERSION: ${{ needs.build-windows.outputs.tag }}
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           cargo build --locked --release --target $env:DESKTOP_TARGET
           cargo test --locked --release -p grid@0.18.0 --target $env:DESKTOP_TARGET
+
+      - name: Sign GPUI update
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $executable = "Voice-Hub-GPUI_${env:TAG}_windows-x86_64.exe"
+          Copy-Item "src-gpui/target/$env:DESKTOP_TARGET/release/voice-hub-gpui-beta.exe" $executable
+          cargo run --locked --manifest-path src-gpui/Cargo.toml -p voice-hub-release-sign -- $executable
+          $manifest = @{
+            version = $env:TAG.TrimStart('v')
+            notes = 'Voice Hub GPUI beta'
+            pub_date = [DateTime]::UtcNow.ToString('o')
+            platforms = @{
+              'windows-x86_64' = @{
+                signature = (Get-Content "$executable.sig" -Raw).Trim()
+                url = "https://github.com/${{ github.repository }}/releases/download/$env:TAG/$executable"
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM gpui-latest.json
 
       - name: Package and attach GPUI beta
         shell: pwsh
@@ -178,9 +205,12 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ needs.build-windows.outputs.tag }}
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           $archive = "Voice-Hub-GPUI-Beta_${env:TAG}_windows-x86_64.zip"
+          $executable = "Voice-Hub-GPUI_${env:TAG}_windows-x86_64.exe"
           New-Item -ItemType Directory -Path gpui-beta | Out-Null
-          Copy-Item "src-gpui/target/$env:DESKTOP_TARGET/release/voice-hub-gpui-beta.exe" gpui-beta/
+          Copy-Item $executable gpui-beta/voice-hub-gpui-beta.exe
+          Copy-Item "$executable.sig" gpui-beta/
           Copy-Item src-gpui/BETA.txt, LICENSE gpui-beta/
           $metadata = cargo metadata --locked --format-version 1 --filter-platform $env:DESKTOP_TARGET --manifest-path src-gpui/Cargo.toml | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Cannot collect dependency license notices' }
@@ -194,13 +224,23 @@ jobs:
               $notices | Copy-Item -Destination $destination
             }
           }
+          $nativeNotices = "gpui-beta/licenses/native-webrtc"
+          New-Item -ItemType Directory -Path $nativeNotices -Force | Out-Null
+          Get-ChildItem $env:LK_CUSTOM_WEBRTC -File -Recurse |
+            Where-Object { $_.Name -match '^(LICENSE|LICENCE|COPYING|NOTICE)(\b|[-_.])' } |
+            ForEach-Object {
+              $relative = [IO.Path]::GetRelativePath($env:LK_CUSTOM_WEBRTC, $_.FullName)
+              $target = Join-Path $nativeNotices $relative
+              New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
+              Copy-Item $_.FullName $target
+            }
           Compress-Archive -Path gpui-beta/* -DestinationPath $archive
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $archive" | Set-Content -Encoding utf8NoBOM "$archive.sha256"
-          gh release upload "$env:TAG" $archive "$archive.sha256" --repo "$env:REPO" --clobber
+          gh release upload "$env:TAG" $archive "$archive.sha256" $executable "$executable.sig" gpui-latest.json --repo "$env:REPO" --clobber
 
   publish-update-mirror:
-    needs: build-windows
+    needs: [build-windows, build-gpui-beta]
     if: ${{ needs.build-windows.outputs.is_release == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -228,11 +268,15 @@ jobs:
           mkdir mirror
           gh release download "$TAG" --repo "$REPO" --dir mirror \
             --pattern 'latest.json' \
+            --pattern 'gpui-latest.json' \
             --pattern '*.exe'
 
           installer=$(jq -r '.platforms["windows-x86_64"].url | split("/")[-1]' mirror/latest.json)
           test -n "$installer"
           test -f "mirror/$installer"
+          gpui=$(jq -r '.platforms["windows-x86_64"].url | split("/")[-1]' mirror/gpui-latest.json)
+          test -n "$gpui"
+          test -f "mirror/$gpui"
 
       - name: Publish server mirror
         env:
@@ -245,16 +289,18 @@ jobs:
               trap "rm -rf $stage" EXIT
               tar -xzf - -C "$stage"
               for file in "$stage"/*; do
-                [ "$(basename "$file")" = latest.json ] && continue
+                case "$(basename "$file")" in latest.json|gpui-latest.json) continue ;; esac
                 cp "$file" /updates/
                 chmod 0644 "/updates/$(basename "$file")"
               done
-              cp "$stage/latest.json" /updates/.latest.json.tmp
-              chmod 0644 /updates/.latest.json.tmp
-              mv /updates/.latest.json.tmp /updates/latest.json
+              for manifest in latest.json gpui-latest.json; do
+                cp "$stage/$manifest" "/updates/.$manifest.tmp"
+                chmod 0644 "/updates/.$manifest.tmp"
+                mv "/updates/.$manifest.tmp" "/updates/$manifest"
+              done
               for existing in /updates/*; do
                 name=$(basename "$existing")
-                [ "$name" = latest.json ] && continue
+                case "$name" in latest.json|gpui-latest.json) continue ;; esac
                 [ -f "$stage/$name" ] && continue
                 rm -f "$existing"
               done

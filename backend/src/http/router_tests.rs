@@ -208,6 +208,18 @@ async fn desktop_updates() {
     assert_eq!(r.headers()[header::CONTENT_DISPOSITION], "attachment; filename=\"Voice Hub_0.4.6_x64-setup.exe\"");
     assert_eq!(text(r).await, "exe");
     assert_eq!(e.get("/desktop/files/..%2Flatest.json", None).await.status(), StatusCode::NOT_FOUND);
+    assert_eq!(e.get("/desktop/gpui-latest.json", None).await.status(), StatusCode::NOT_FOUND);
+    std::fs::write(
+        e.dir.join("updates/gpui-latest.json"),
+        r#"{"version":"0.5.8","platforms":{"windows-x86_64":{"signature":"gpui-sig","url":"https://github.com/o/r/releases/download/v0.5.8/Voice-Hub-GPUI.exe"}}}"#,
+    ).unwrap();
+    let gpui = text(e.get("/desktop/gpui-latest.json", None).await).await;
+    assert!(gpui.contains("/desktop/files/Voice-Hub-GPUI.exe"));
+    assert!(gpui.contains("gpui-sig"));
+    assert!(!gpui.contains("setup.exe"));
+    let stable = text(e.get("/desktop/latest.json", None).await).await;
+    assert!(stable.contains("setup.exe"));
+    assert!(!stable.contains("gpui-sig"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
