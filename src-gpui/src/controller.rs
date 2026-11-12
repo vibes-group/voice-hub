@@ -26,6 +26,7 @@ pub enum Action {
     Login {
         server: String,
         password: String,
+        name: String,
     },
     Restore,
     Logout,
@@ -445,8 +446,19 @@ impl Worker {
     }
     async fn action(&mut self, action: Action) -> Result<(), String> {
         match action {
-            Action::Login { server, password } => {
+            Action::Login {
+                server,
+                password,
+                name,
+            } => {
+                let name = name.trim();
+                if name.is_empty() || name.chars().count() > 64 {
+                    return Err("Имя должно содержать от 1 до 64 символов".into());
+                }
                 self.clear().await;
+                self.state.settings.name = name.into();
+                self.state.status = "Вход…".into();
+                self.emit().await;
                 let api = if password.is_empty() {
                     match Api::restore(&server).await? {
                         Some(api) => api,
@@ -477,7 +489,15 @@ impl Worker {
                 self.clear().await;
                 Ok(())
             }
-            Action::Configure(settings) => {
+            Action::Configure(mut settings) => {
+                // Configuration can arrive from a UI snapshot preceding a room or session change.
+                settings.server.clone_from(&self.state.settings.server);
+                settings
+                    .client_id
+                    .clone_from(&self.state.settings.client_id);
+                settings.room.clone_from(&self.state.settings.room);
+                settings.name.clone_from(&self.state.settings.name);
+                settings.voice_active = self.state.settings.voice_active;
                 let previous_mode = self.state.settings.screen.mode.clone();
                 if let Some(media) = &mut self.media {
                     media.configure(*settings.clone())?;

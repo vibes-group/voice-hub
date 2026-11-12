@@ -594,13 +594,22 @@ impl Client {
             cx.notify();
             return;
         }
+        let name = self.name.read(cx).text.trim().to_owned();
+        if name.is_empty() || name.chars().count() > 64 {
+            self.error = Some("Имя должно содержать от 1 до 64 символов".into());
+            cx.notify();
+            return;
+        }
         self.error = None;
         let password = self.password.read(cx).text.clone();
         self.password.update(cx, |input, cx| input.clear(cx));
-        self.state.settings.name = self.name.read(cx).text.trim().into();
-        self.configure(cx);
         self.state.status = "Вход…".into();
-        self.act(Action::Login { server, password });
+        self.act(Action::Login {
+            server,
+            password,
+            name,
+        });
+        cx.notify();
     }
     fn send_chat(&mut self, cx: &mut Context<Self>) {
         let text = self.compose.read(cx).text.clone();

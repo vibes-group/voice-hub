@@ -171,6 +171,7 @@ async fn chat_survives_reconnect_and_room_switch_without_opening_voice_devices()
         .send(Action::Login {
             server,
             password: "test-password".into(),
+            name: "Tester".into(),
         })
         .await
         .unwrap();
@@ -206,10 +207,25 @@ async fn chat_survives_reconnect_and_room_switch_without_opening_voice_devices()
         .send(Action::Room("room2".into()))
         .await
         .unwrap();
-    until(&mut controller, |s| {
-        s.connected && s.settings.room == "room2"
+    let mut stale = snapshot.settings.clone();
+    stale.server = "https://stale.example/".into();
+    stale.client_id = uuid::Uuid::new_v4().to_string();
+    stale.name = "Stale name".into();
+    stale.voice_active = true;
+    stale.input_volume = 125;
+    controller
+        .actions
+        .send(Action::Configure(Box::new(stale)))
+        .await
+        .unwrap();
+    let snapshot = until(&mut controller, |s| {
+        s.connected && s.settings.room == "room2" && s.settings.input_volume == 125
     })
     .await;
+    assert!(!snapshot.settings.voice_active);
+    assert_eq!(snapshot.settings.client_id, settings.client_id);
+    assert_eq!(snapshot.settings.name, "Tester");
+    assert!(snapshot.settings.server.starts_with("http://127.0.0.1:"));
     controller.actions.send(Action::Logout).await.unwrap();
     until(&mut controller, |s| !s.authenticated).await;
     drop(controller);
