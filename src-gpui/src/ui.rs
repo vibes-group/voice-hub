@@ -604,7 +604,12 @@ impl Client {
                     canvas(|_, _, _| (), {
                         let entity = cx.entity();
                         move |bounds, _, window, cx| {
-                            if let Some(player) = &entity.read(cx).player {
+                            let client = entity.read(cx);
+                            if let Some(player) = &client.player {
+                                if client.lightbox.is_some() {
+                                    player.hide();
+                                    return;
+                                }
                                 let factor = window.scale_factor();
                                 let clip = bounds.intersect(&window.content_mask().bounds);
                                 player.place(
