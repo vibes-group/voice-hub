@@ -20,36 +20,25 @@ pub struct Devices {
 
 impl Devices {
     pub fn open(muted: Arc<AtomicBool>, deafened: Arc<AtomicBool>) -> Result<Self, String> {
+        Self::open_selected(muted, deafened, "", "")
+    }
+
+    pub fn open_selected(
+        muted: Arc<AtomicBool>,
+        deafened: Arc<AtomicBool>,
+        mic: &str,
+        speaker: &str,
+    ) -> Result<Self, String> {
         let host = cpal::default_host();
-        let input = host.default_input_device().ok_or("Микрофон не найден")?;
-        let output = host
-            .default_output_device()
-            .ok_or("Устройство воспроизведения не найдено")?;
-        let select = |configs: Vec<cpal::SupportedStreamConfigRange>| {
-            configs
-                .into_iter()
-                .filter(|c| {
-                    matches!(
-                        c.sample_format(),
-                        SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16
-                    )
-                })
-                .filter(|c| c.channels() > 0 && c.channels() <= 2)
-                .find_map(|c| c.try_with_sample_rate(SAMPLE_RATE))
-                .ok_or("Для beta требуется устройство с поддержкой 48 кГц".to_string())
-        };
-        let input_config = select(
-            input
-                .supported_input_configs()
-                .map_err(|_| "Не удалось прочитать параметры микрофона")?
-                .collect(),
-        )?;
-        let output_config = select(
-            output
-                .supported_output_configs()
-                .map_err(|_| "Не удалось прочитать параметры вывода")?
-                .collect(),
-        )?;
+        let input = selected(&host, mic, true).ok_or("Микрофон не найден")?;
+        let output =
+            selected(&host, speaker, false).ok_or("Устройство воспроизведения не найдено")?;
+        let input_config = input
+            .default_input_config()
+            .map_err(|_| "Не удалось прочитать параметры микрофона")?;
+        let output_config = output
+            .default_output_config()
+            .map_err(|_| "Не удалось прочитать параметры вывода")?;
         let (tx, captured) = mpsc::channel(3);
         let playback = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER)));
         let failed = Arc::new(AtomicBool::new(false));
@@ -62,7 +51,12 @@ impl Devices {
             SampleFormat::F32 => input_stream!(f32),
             SampleFormat::I16 => input_stream!(i16),
             SampleFormat::U16 => input_stream!(u16),
-            _ => unreachable!(),
+            SampleFormat::I8 => input_stream!(i8),
+            SampleFormat::I32 => input_stream!(i32),
+            SampleFormat::F64 => input_stream!(f64),
+            SampleFormat::U8 => input_stream!(u8),
+            SampleFormat::U32 => input_stream!(u32),
+            _ => return Err("Формат микрофона не поддерживается".into()),
         }?;
         macro_rules! output_stream {
             ($ty:ty) => {
@@ -79,7 +73,12 @@ impl Devices {
             SampleFormat::F32 => output_stream!(f32),
             SampleFormat::I16 => output_stream!(i16),
             SampleFormat::U16 => output_stream!(u16),
-            _ => unreachable!(),
+            SampleFormat::I8 => output_stream!(i8),
+            SampleFormat::I32 => output_stream!(i32),
+            SampleFormat::F64 => output_stream!(f64),
+            SampleFormat::U8 => output_stream!(u8),
+            SampleFormat::U32 => output_stream!(u32),
+            _ => return Err("Формат устройства вывода не поддерживается".into()),
         }?;
         output
             .play()
@@ -109,22 +108,25 @@ where
     let channels = config.channels as usize;
     let mut frame = [0.0; FRAME];
     let mut offset = 0;
+    let mut resampler = crate::audio::Resampler::new(config.sample_rate, SAMPLE_RATE);
     device
         .build_input_stream(
             config,
             move |data: &[T], _| {
                 for sample in data.chunks_exact(channels) {
-                    frame[offset] = if muted.load(Ordering::Relaxed) {
+                    let sample = if muted.load(Ordering::Relaxed) {
                         0.0
                     } else {
                         sample.iter().map(|s| s.to_sample::<f32>()).sum::<f32>() / channels as f32
                     };
-                    offset += 1;
-                    if offset == FRAME {
-                        // Never block the audio callback on the network or encoder.
-                        let _ = tx.try_send(frame);
-                        offset = 0;
-                    }
+                    resampler.push(sample, |sample| {
+                        frame[offset] = sample;
+                        offset += 1;
+                        if offset == FRAME {
+                            let _ = tx.try_send(frame);
+                            offset = 0;
+                        }
+                    });
                 }
             },
             move |_| {
@@ -146,6 +148,10 @@ where
     T: SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
+    let ratio = SAMPLE_RATE as f64 / config.sample_rate as f64;
+    let mut phase = 0.0;
+    let mut previous = 0.0_f32;
+    let mut next = 0.0_f32;
     device
         .build_output_stream(
             config,
@@ -157,8 +163,14 @@ where
                         return;
                     }
                     for frame in data.chunks_exact_mut(channels) {
-                        let sample = T::from_sample(queue.pop_front().unwrap_or(0.0));
-                        frame.fill(sample);
+                        while phase >= 1.0 {
+                            previous = next;
+                            next = queue.pop_front().unwrap_or(0.0);
+                            phase -= 1.0;
+                        }
+                        let sample = previous + (next - previous) * phase as f32;
+                        frame.fill(T::from_sample(sample));
+                        phase += ratio;
                     }
                 }
             },
@@ -168,4 +180,88 @@ where
             None,
         )
         .map_err(|_| "Не удалось открыть устройство воспроизведения".into())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+}
+
+pub fn enumerate(input: bool) -> Vec<AudioDevice> {
+    let host = cpal::default_host();
+    let mut devices = vec![AudioDevice {
+        id: String::new(),
+        name: "По умолчанию".into(),
+    }];
+    if let Ok(found) = if input {
+        host.input_devices()
+    } else {
+        host.output_devices()
+    } {
+        devices.extend(found.filter_map(|device| {
+            Some(AudioDevice {
+                id: device.id().ok()?.to_string(),
+                name: device.to_string(),
+            })
+        }));
+    }
+    devices
+}
+fn selected(host: &cpal::Host, id: &str, input: bool) -> Option<cpal::Device> {
+    id.parse::<cpal::DeviceId>()
+        .ok()
+        .and_then(|id| host.device_by_id(&id))
+        .filter(|d| {
+            if input {
+                d.supports_input()
+            } else {
+                d.supports_output()
+            }
+        })
+        .or_else(|| {
+            if input {
+                host.default_input_device()
+            } else {
+                host.default_output_device()
+            }
+        })
+}
+
+#[cfg(target_os = "windows")]
+pub struct Loopback {
+    _stream: cpal::Stream,
+    pub captured: mpsc::Receiver<[f32; FRAME]>,
+}
+#[cfg(target_os = "windows")]
+impl Loopback {
+    pub fn open(speaker: &str) -> Result<Self, String> {
+        let host = cpal::default_host();
+        let device = selected(&host, speaker, false).ok_or("Не найден системный аудиовыход")?;
+        let config = device
+            .default_output_config()
+            .map_err(|_| "Не удалось прочитать параметры системного аудио")?;
+        let (tx, captured) = mpsc::channel(3);
+        let muted = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(AtomicBool::new(false));
+        macro_rules! stream {
+            ($ty:ty) => {
+                capture::<$ty>(&device, config.config(), tx, muted, failed)
+            };
+        }
+        let stream = match config.sample_format() {
+            SampleFormat::F32 => stream!(f32),
+            SampleFormat::I16 => stream!(i16),
+            SampleFormat::I32 => stream!(i32),
+            SampleFormat::U16 => stream!(u16),
+            _ => return Err("Неподдерживаемый формат системного аудио".into()),
+        }?;
+        stream
+            .play()
+            .map_err(|_| "Не удалось запустить захват системного аудио")?;
+        Ok(Self {
+            _stream: stream,
+            captured,
+        })
+    }
 }

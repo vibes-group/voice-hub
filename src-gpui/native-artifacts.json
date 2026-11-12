@@ -1,0 +1,18 @@
+{
+  "tag": "webrtc-a545de4",
+  "repository": "livekit/rust-sdks",
+  "assets": {
+    "windows-x86_64": {
+      "name": "webrtc-win-x64-release.zip",
+      "sha256": "862403fcb248c7d8803487e4c22b8821c6130e89100cb9c69be95ef45ff46146",
+      "published": "2026-10-23T00:15:16Z",
+      "directory": "win-x64-release"
+    },
+    "linux-x86_64": {
+      "name": "webrtc-linux-x64-release.zip",
+      "sha256": "2ece73b9a72a2cacd73d0c62ac3a414e202f37885c3c8f49dddb43c1443ac0bd",
+      "published": "2026-10-23T00:15:12Z",
+      "directory": "linux-x64-release"
+    }
+  }
+}

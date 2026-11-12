@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Peer {
     pub id: String,
@@ -14,6 +14,99 @@ pub struct Peer {
     pub deafened: bool,
     #[serde(default)]
     pub chat_only: bool,
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub screen_sharing: bool,
+    #[serde(default)]
+    pub screen_sharing_has_audio: bool,
+    #[serde(default)]
+    pub screen_sharing_video_codec: Option<String>,
+}
+
+impl Peer {
+    pub fn preference_key(&self) -> &str {
+        if self.client_id.is_empty() {
+            &self.id
+        } else {
+            &self.client_id
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub upload_id: String,
+    pub kind: String,
+    pub name: String,
+    pub mime: String,
+    pub size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blur_thumb: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub id: String,
+    pub from: String,
+    pub text: String,
+    pub ts: u64,
+    #[serde(default)]
+    pub client_msg_id: String,
+    #[serde(default)]
+    pub sender_name: String,
+    #[serde(default)]
+    pub sender_client_id: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub deleted_upload_ids: Vec<String>,
+    #[serde(default)]
+    pub pending: bool,
+    #[serde(skip)]
+    pub upload_progress: f32,
+    #[serde(skip)]
+    pub failed: bool,
+}
+
+pub const CHAT_MAX_BYTES: usize = 2000;
+pub const CHAT_MAX_ATTACHMENTS: usize = 10;
+pub const UPLOAD_MAX_BYTES: u64 = 100 * 1024 * 1024;
+
+pub fn validate_chat(text: &str, attachments: &[Attachment]) -> Result<(), String> {
+    if text.trim().is_empty() && attachments.is_empty() {
+        return Err("Введите сообщение или прикрепите файл".into());
+    }
+    if text.len() > CHAT_MAX_BYTES {
+        return Err("Сообщение длиннее 2000 байт".into());
+    }
+    if attachments.len() > CHAT_MAX_ATTACHMENTS {
+        return Err("Можно прикрепить до 10 файлов".into());
+    }
+    Ok(())
+}
+
+#[derive(Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerConfig {
+    pub ice_servers: Vec<IceServer>,
+    pub role: String,
+}
+
+// TURN credentials are intentionally excluded from Debug and persisted settings.
+#[derive(Clone, Default, Deserialize)]
+pub struct IceServer {
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub credential: String,
 }
 
 #[derive(Deserialize)]

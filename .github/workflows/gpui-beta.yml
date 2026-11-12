@@ -5,12 +5,14 @@ on:
     paths:
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
+      - 'scripts/prepare-webrtc.py'
       - 'backend/src/sfu/testdata/**'
       - '.github/workflows/gpui-beta.yml'
   pull_request:
     paths:
       - 'src-gpui/**'
       - 'scripts/check-cargo-age.py'
+      - 'scripts/prepare-webrtc.py'
       - 'backend/src/sfu/testdata/**'
       - '.github/workflows/gpui-beta.yml'
   workflow_dispatch:
@@ -31,6 +33,8 @@ jobs:
           toolchain: 1.99.1
       - name: Check dependency release ages
         run: python scripts/check-cargo-age.py src-gpui/Cargo.lock
+      - name: Prepare verified native WebRTC SDK
+        run: python scripts/prepare-webrtc.py --platform windows-x86_64 --github-env "$env:GITHUB_ENV"
       - name: Find DirectX shader compiler
         shell: pwsh
         run: |

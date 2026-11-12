@@ -4,6 +4,40 @@ pub const SAMPLE_RATE: u32 = 48_000;
 pub const FRAME: usize = 960;
 pub const MAX_BUFFER: usize = FRAME * 5;
 
+/// Streaming conversion keeps fractional phase between device callbacks.
+pub struct Resampler {
+    input_rate: u32,
+    output_rate: u32,
+    phase: u64,
+    previous: f32,
+    initialized: bool,
+}
+impl Resampler {
+    pub fn new(input_rate: u32, output_rate: u32) -> Self {
+        assert!(input_rate > 0 && output_rate > 0);
+        Self {
+            input_rate,
+            output_rate,
+            phase: 0,
+            previous: 0.0,
+            initialized: false,
+        }
+    }
+    pub fn push(&mut self, sample: f32, mut output: impl FnMut(f32)) {
+        if !self.initialized {
+            self.previous = sample;
+            self.initialized = true;
+        }
+        while self.phase < self.output_rate as u64 {
+            let fraction = self.phase as f32 / self.output_rate as f32;
+            output(self.previous + (sample - self.previous) * fraction);
+            self.phase += self.input_rate as u64;
+        }
+        self.phase -= self.output_rate as u64;
+        self.previous = sample;
+    }
+}
+
 /// Queues are bounded so a stalled device or network cannot accumulate latency.
 #[derive(Default)]
 pub struct Mixer {
