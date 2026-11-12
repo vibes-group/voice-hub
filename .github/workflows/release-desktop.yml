@@ -180,6 +180,10 @@ jobs:
           cargo test --locked --release -p grid@0.18.0 --target $env:DESKTOP_TARGET
           cargo build --locked --package voice-hub-release-sign --target $env:DESKTOP_TARGET
 
+      - name: Smoke-test native window
+        working-directory: src-gpui
+        run: ./tests/smoke-window.ps1 "target/$env:DESKTOP_TARGET/release/voice-hub-gpui-beta.exe"
+
       - name: Sign GPUI update
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

@@ -65,3 +65,6 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           cargo build --locked --release
           cargo test --locked --release -p grid@0.18.0
+      - name: Smoke-test native window
+        working-directory: src-gpui
+        run: ./tests/smoke-window.ps1 target/release/voice-hub-gpui-beta.exe
