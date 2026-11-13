@@ -94,8 +94,13 @@ export function useAttachmentUrl(
   roomId: string,
   enabled = true,
 ): { url: string | null; status: AttachmentUrlStatus; reload: () => void } {
-  const [status, setStatus] = useState<AttachmentUrlStatus>('loading');
-  const [url, setUrl] = useState<string | null>(null);
+  // Tagged with its upload: after uploadId changes, the render before the effect
+  // resets state must not hand out the previous attachment's URL or status.
+  const [state, setState] = useState<{
+    uploadId: string;
+    status: AttachmentUrlStatus;
+    url: string | null;
+  }>({ uploadId, status: 'loading', url: null });
   const [attempt, setAttempt] = useState(0);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
@@ -105,23 +110,21 @@ export function useAttachmentUrl(
     let cancelled = false;
     let objectUrl: string | null = null;
     const controller = new AbortController();
-    setStatus('loading');
-    setUrl(null);
+    setState({ uploadId, status: 'loading', url: null });
 
     resolveAttachmentBlob(uploadId, roomId, controller.signal)
       .then((blob) => {
         if (cancelled) return;
         if (!blob) {
-          setStatus('unavailable');
+          setState({ uploadId, status: 'unavailable', url: null });
           return;
         }
         objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-        setStatus('ready');
+        setState({ uploadId, status: 'ready', url: objectUrl });
       })
       .catch((err) => {
         if (cancelled || (err as DOMException)?.name === 'AbortError') return;
-        setStatus('error');
+        setState({ uploadId, status: 'error', url: null });
       });
 
     return () => {
@@ -131,5 +134,6 @@ export function useAttachmentUrl(
     };
   }, [uploadId, roomId, attempt, enabled]);
 
-  return { url, status, reload };
+  if (state.uploadId !== uploadId) return { url: null, status: 'loading', reload };
+  return { url: state.url, status: state.status, reload };
 }

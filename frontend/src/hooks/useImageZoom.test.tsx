@@ -9,8 +9,10 @@ let root: Root;
 let resize: (size: { width: number; height: number; x: number; y: number }) => void;
 const disconnect = vi.fn();
 
-function Viewer({ id }: { id: string }) {
-  const { stageRef, imgProps, zoom, reset, zoomStep } = useImageZoom(id);
+type Image = { id: string; width: number; height: number };
+
+function Viewer({ image }: { image: Image | null }) {
+  const { stageRef, imgProps, zoom, reset, zoomStep } = useImageZoom(image);
   return (
     <div ref={stageRef}>
       <img {...imgProps} alt="test" />
@@ -25,12 +27,8 @@ function image() {
   return container.querySelector('img')!;
 }
 
-function load(width: number, height: number) {
-  Object.defineProperties(image(), {
-    naturalWidth: { configurable: true, value: width },
-    naturalHeight: { configurable: true, value: height },
-  });
-  act(() => image().dispatchEvent(new Event('load')));
+function show(img: Image | null) {
+  act(() => root.render(<Viewer image={img} />));
 }
 
 function wheel(factor: number) {
@@ -60,11 +58,12 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<Viewer id="first" />));
+  show(null);
   const stage = image().parentElement!;
   vi.spyOn(stage, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 50 } as DOMRect);
+  expect(image().style.visibility).toBe('hidden');
   act(() => resize({ width: 800, height: 600, x: 16, y: 0 }));
-  load(1600, 1200);
+  show({ id: 'first', width: 1600, height: 1200 });
 });
 
 afterEach(() => {
@@ -103,10 +102,8 @@ describe('useImageZoom layout', () => {
     expect(image().style.width).toBe('400px');
     expect(image().style.height).toBe('300px');
     wheel(2);
-    act(() => root.render(<Viewer id="second" />));
+    show({ id: 'second', width: 100, height: 200 });
     expect(container.querySelector('output')!.textContent).toBe('1');
-    expect(image().style.visibility).toBe('hidden');
-    load(100, 200);
     expect(image().style.width).toBe('100px');
     expect(image().style.height).toBe('200px');
     expect(image().style.left).toBe('166px');

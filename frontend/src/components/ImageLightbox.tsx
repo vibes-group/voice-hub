@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
 import { useAttachmentUrl, useDownload } from '../hooks/useAttachmentUrl';
+import { useDecodedImage } from '../hooks/useDecodedImage';
 import { useImageZoom } from '../hooks/useImageZoom';
 import { MAX_SCALE } from '../utils/zoom';
 import { isInlineVideo } from '../utils/mediaBox';
@@ -86,10 +87,15 @@ function Viewer({
       root.style.overflow = previous;
     };
   }, []);
-  // The container is supported but its codec doesn't decode here.
+  // The file is supported but doesn't decode here.
   const [undecodableId, setUndecodableId] = useState<string | null>(null);
-  const { zoom, stageRef, imgProps, zoomStep, reset, wasDragged } = useImageZoom(current.uploadId);
-  const isImage = !!url && !isInlineVideo(current.mime) && undecodableId !== current.uploadId;
+  const isVideo = isInlineVideo(current.mime);
+  const showsImage =
+    !isVideo && undecodableId !== current.uploadId && (status === 'loading' || status === 'ready');
+  // Until the next image decodes, the previous one stays up; it dims if that drags on.
+  const shown = useDecodedImage(current.uploadId, url, showsImage, setUndecodableId);
+  const stale = !!shown && shown.id !== current.uploadId;
+  const { zoom, stageRef, imgProps, zoomStep, reset, wasDragged } = useImageZoom(shown);
 
   return (
     <div
@@ -111,7 +117,7 @@ function Viewer({
           )}
         </span>
         <div className="flex items-center gap-2">
-          {isImage && (
+          {shown && (
             <div className="flex items-center">
               <button
                 type="button"
@@ -172,8 +178,8 @@ function Viewer({
         className="relative grid min-h-0 flex-1 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center px-4 pb-4"
       >
         {undecodableId === current.uploadId ? (
-          <div className="text-sm text-zinc-400">Не воспроизводится — скачайте файл</div>
-        ) : url && isInlineVideo(current.mime) ? (
+          <div className="text-sm text-zinc-400">Не открывается — скачайте файл</div>
+        ) : url && isVideo ? (
           <video
             key={current.uploadId}
             src={url}
@@ -184,12 +190,12 @@ function Viewer({
             onClick={(e) => e.stopPropagation()}
             onError={() => setUndecodableId(current.uploadId)}
           />
-        ) : url ? (
+        ) : shown ? (
           <img
             {...imgProps}
-            src={url}
+            src={shown.url}
             alt={current.name}
-            className={`max-w-none select-none ${zoom.scale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            className={`max-w-none select-none transition-opacity ${stale ? 'opacity-40 delay-300 duration-300' : ''} ${zoom.scale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
           />
         ) : (
           <div className="text-sm text-zinc-400">

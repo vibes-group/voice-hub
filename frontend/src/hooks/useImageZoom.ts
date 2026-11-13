@@ -3,7 +3,6 @@ import type {
   CSSProperties,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
-  SyntheticEvent,
 } from 'react';
 import { FIT, panBy, zoomAt, type Size, type Zoom } from '../utils/zoom';
 
@@ -11,16 +10,16 @@ const WHEEL_SPEED = 0.002;
 // Trackpad pinch arrives as ctrl+wheel with small deltas.
 const PINCH_SPEED = 0.01;
 
-// Wheel/button zoom and drag-to-pan for the lightbox image. `stageRef` goes on
-// the always-mounted container (it takes the wheel), `imgRef` on the <img>.
-// Zoom resets when `id` changes.
-export function useImageZoom(id: string) {
+// Wheel/button zoom and drag-to-pan for the lightbox image of the given natural
+// size. `stageRef` goes on the always-mounted container (it takes the wheel),
+// `imgProps` on the <img>. Zoom resets when the image's `id` changes.
+export function useImageZoom(image: { id: string; width: number; height: number } | null) {
+  const id = image?.id ?? '';
   const [state, setState] = useState({ id, ...FIT });
   const zoom: Zoom = state.id === id ? state : FIT;
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0, x: 0, y: 0 });
-  const [natural, setNatural] = useState({ id, width: 0, height: 0 });
   const drag = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
 
@@ -36,12 +35,11 @@ export function useImageZoom(id: string) {
   }, []);
 
   // Keep the fitted size independent of the enlarged image's layout.
-  const fitScale =
-    natural.id === id && natural.width && natural.height
-      ? Math.min(1, viewport.width / natural.width, viewport.height / natural.height)
-      : 0;
-  const width = natural.width * fitScale;
-  const height = natural.height * fitScale;
+  const fitScale = image
+    ? Math.min(1, viewport.width / image.width, viewport.height / image.height)
+    : 0;
+  const width = (image?.width ?? 0) * fitScale;
+  const height = (image?.height ?? 0) * fitScale;
 
   const update = useCallback(
     (fn: (z: Zoom, size: Size) => Zoom) => {
@@ -122,10 +120,6 @@ export function useImageZoom(id: string) {
     ref: imgRef,
     draggable: false,
     style,
-    onLoad(e: SyntheticEvent<HTMLImageElement>) {
-      const img = e.currentTarget;
-      setNatural({ id, width: img.naturalWidth, height: img.naturalHeight });
-    },
     onPointerDown(e: ReactPointerEvent<HTMLImageElement>) {
       dragged.current = false;
       if (!zoomed || e.button !== 0) return;
