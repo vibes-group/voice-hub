@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Attachment } from '../sfu/protocol';
 import { useAttachmentUrl, useDownload } from '../hooks/useAttachmentUrl';
+import { useImageZoom } from '../hooks/useImageZoom';
+import { MAX_SCALE } from '../utils/zoom';
 import { isInlineVideo } from '../utils/mediaBox';
+
+const ZOOM_STEP = 1.5;
 
 type Props = {
   images: Attachment[];
@@ -15,6 +19,7 @@ type Props = {
 
 // Fullscreen image and video viewer (modeled on ScreenShareFocused). ←/→ page
 // across every image and video in the visible chat, not just one message's album.
+// Images zoom with the wheel, the magnifier buttons or a double click, and pan by drag.
 export function ImageLightbox({ images, index, roomId, onClose, onNavigate, onDelete }: Props) {
   const open = index !== null && index >= 0 && index < images.length;
 
@@ -83,9 +88,16 @@ function Viewer({
   }, []);
   // The container is supported but its codec doesn't decode here.
   const [undecodableId, setUndecodableId] = useState<string | null>(null);
+  const { zoom, stageRef, imgProps, zoomStep, reset, wasDragged } = useImageZoom(current.uploadId);
+  const isImage = !!url && !isInlineVideo(current.mime) && undecodableId !== current.uploadId;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/95"
+      onClick={() => {
+        if (!wasDragged()) onClose();
+      }}
+    >
       <header
         className="flex items-center justify-between px-4 py-2 text-zinc-200"
         onClick={(e) => e.stopPropagation()}
@@ -99,6 +111,38 @@ function Viewer({
           )}
         </span>
         <div className="flex items-center gap-2">
+          {isImage && (
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => zoomStep(1 / ZOOM_STEP)}
+                disabled={zoom.scale <= 1}
+                aria-label="Уменьшить"
+                title="Уменьшить"
+                className="rounded p-1 mobile:p-3.5 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <ZoomOut size={18} strokeWidth={2.25} />
+              </button>
+              <button
+                type="button"
+                onClick={reset}
+                title="Вписать в экран"
+                className="w-12 rounded py-1 text-center text-xs tabular-nums hover:bg-white/10 mobile:hidden"
+              >
+                {Math.round(zoom.scale * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() => zoomStep(ZOOM_STEP)}
+                disabled={zoom.scale >= MAX_SCALE}
+                aria-label="Увеличить"
+                title="Увеличить (или колёсико мыши)"
+                className="rounded p-1 mobile:p-3.5 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <ZoomIn size={18} strokeWidth={2.25} />
+              </button>
+            </div>
+          )}
           <DownloadButton key={current.uploadId} attachment={current} roomId={roomId} />
           <button
             type="button"
@@ -123,7 +167,10 @@ function Viewer({
         </div>
       </header>
 
-      <div className="relative grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center px-4 pb-4">
+      <div
+        ref={stageRef}
+        className="relative grid min-h-0 flex-1 overflow-hidden grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center px-4 pb-4"
+      >
         {undecodableId === current.uploadId ? (
           <div className="text-sm text-zinc-400">Не воспроизводится — скачайте файл</div>
         ) : url && isInlineVideo(current.mime) ? (
@@ -139,10 +186,10 @@ function Viewer({
           />
         ) : url ? (
           <img
+            {...imgProps}
             src={url}
             alt={current.name}
-            className="max-h-full max-w-full object-contain"
-            onClick={(e) => e.stopPropagation()}
+            className={`max-h-full max-w-full object-contain select-none ${zoom.scale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
           />
         ) : (
           <div className="text-sm text-zinc-400">
