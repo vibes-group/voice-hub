@@ -1,23 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { FIT, panBy, zoomAt, type Zoom } from '../utils/zoom';
+import type {
+  CSSProperties,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  SyntheticEvent,
+} from 'react';
+import { FIT, panBy, zoomAt, type Size, type Zoom } from '../utils/zoom';
 
 const WHEEL_SPEED = 0.002;
 // Trackpad pinch arrives as ctrl+wheel with small deltas.
 const PINCH_SPEED = 0.01;
-
-function sizeOf(img: HTMLImageElement) {
-  return { width: img.offsetWidth, height: img.offsetHeight };
-}
-
-// Client point relative to the fitted (untransformed) image centre.
-function fromCentre(img: HTMLImageElement, clientX: number, clientY: number) {
-  const parent = img.offsetParent!.getBoundingClientRect();
-  return {
-    x: clientX - (parent.left + img.offsetLeft + img.offsetWidth / 2),
-    y: clientY - (parent.top + img.offsetTop + img.offsetHeight / 2),
-  };
-}
 
 // Wheel/button zoom and drag-to-pan for the lightbox image. `stageRef` goes on
 // the always-mounted container (it takes the wheel), `imgRef` on the <img>.
@@ -27,24 +19,50 @@ export function useImageZoom(id: string) {
   const zoom: Zoom = state.id === id ? state : FIT;
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
+  const [viewport, setViewport] = useState({ width: 0, height: 0, x: 0, y: 0 });
+  const [natural, setNatural] = useState({ id, width: 0, height: 0 });
   const drag = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
 
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height, x, y } = entry.contentRect;
+      setViewport({ width, height, x, y });
+    });
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, []);
+
+  // Keep the fitted size independent of the enlarged image's layout.
+  const fitScale =
+    natural.id === id && natural.width && natural.height
+      ? Math.min(1, viewport.width / natural.width, viewport.height / natural.height)
+      : 0;
+  const width = natural.width * fitScale;
+  const height = natural.height * fitScale;
+
   const update = useCallback(
-    (fn: (z: Zoom, img: HTMLImageElement) => Zoom) => {
-      const img = imgRef.current;
-      if (!img) return;
-      setState((prev) => ({ id, ...fn(prev.id === id ? prev : FIT, img) }));
+    (fn: (z: Zoom, size: Size) => Zoom) => {
+      if (!imgRef.current || !width || !height) return;
+      setState((prev) => ({ id, ...fn(prev.id === id ? prev : FIT, { width, height }) }));
     },
-    [id],
+    [id, width, height],
   );
 
   const zoomAround = useCallback(
-    (factor: number, clientX: number, clientY: number) =>
-      update((z, img) =>
-        zoomAt(z, z.scale * factor, fromCentre(img, clientX, clientY), sizeOf(img)),
-      ),
-    [update],
+    (factor: number, clientX: number, clientY: number) => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const r = stage.getBoundingClientRect();
+      const anchor = {
+        x: clientX - (r.left + stage.clientLeft + viewport.x + viewport.width / 2),
+        y: clientY - (r.top + stage.clientTop + viewport.y + viewport.height / 2),
+      };
+      update((z, size) => zoomAt(z, z.scale * factor, anchor, size));
+    },
+    [update, viewport],
   );
 
   useEffect(() => {
@@ -64,9 +82,15 @@ export function useImageZoom(id: string) {
   const zoomStep = useCallback(
     (factor: number) => {
       const r = stageRef.current?.getBoundingClientRect();
-      if (r) zoomAround(factor, r.left + r.width / 2, r.top + r.height / 2);
+      const stage = stageRef.current;
+      if (r && stage)
+        zoomAround(
+          factor,
+          r.left + stage.clientLeft + viewport.x + viewport.width / 2,
+          r.top + stage.clientTop + viewport.y + viewport.height / 2,
+        );
     },
-    [zoomAround],
+    [zoomAround, viewport],
   );
 
   const reset = useCallback(() => setState({ id, ...FIT }), [id]);
@@ -82,12 +106,25 @@ export function useImageZoom(id: string) {
   const endDrag = () => {
     drag.current = null;
   };
+  // Resize the raster itself instead of scaling a composited texture.
+  const renderedWidth = Math.round(width * zoom.scale);
+  const renderedHeight = Math.round(height * zoom.scale);
+  const style: CSSProperties = {
+    position: 'absolute',
+    width: renderedWidth,
+    height: renderedHeight,
+    left: Math.round(viewport.x + (viewport.width - renderedWidth) / 2 + zoom.x),
+    top: Math.round(viewport.y + (viewport.height - renderedHeight) / 2 + zoom.y),
+    visibility: fitScale ? undefined : 'hidden',
+    touchAction: zoomed ? 'none' : undefined,
+  };
   const imgProps = {
     ref: imgRef,
     draggable: false,
-    style: {
-      transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`,
-      touchAction: zoomed ? 'none' : undefined,
+    style,
+    onLoad(e: SyntheticEvent<HTMLImageElement>) {
+      const img = e.currentTarget;
+      setNatural({ id, width: img.naturalWidth, height: img.naturalHeight });
     },
     onPointerDown(e: ReactPointerEvent<HTMLImageElement>) {
       dragged.current = false;
@@ -103,7 +140,7 @@ export function useImageZoom(id: string) {
       if (!dx && !dy) return;
       drag.current = { x: e.clientX, y: e.clientY };
       dragged.current = true;
-      update((z, img) => panBy(z, dx, dy, sizeOf(img)));
+      update((z, size) => panBy(z, dx, dy, size));
     },
     onPointerUp: endDrag,
     onPointerCancel: endDrag,

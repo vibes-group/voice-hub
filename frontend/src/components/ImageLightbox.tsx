@@ -189,7 +189,7 @@ function Viewer({
             {...imgProps}
             src={url}
             alt={current.name}
-            className={`max-h-full max-w-full object-contain select-none ${zoom.scale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            className={`max-w-none select-none ${zoom.scale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
           />
         ) : (
           <div className="text-sm text-zinc-400">
