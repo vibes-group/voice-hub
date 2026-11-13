@@ -103,7 +103,6 @@ jobs:
             echo "**Windows:** [\`${INSTALLER}\`](${INSTALLER_URL})"
             echo
             echo "**GPUI beta (Windows, portable):** [\`Voice-Hub-GPUI-Beta_${TAG}_windows-x86_64.zip\`](https://github.com/${REPO}/releases/download/${TAG}/Voice-Hub-GPUI-Beta_${TAG}_windows-x86_64.zip)"
-            echo 'Native GPUI client: voice with TURN, echo/noise processing, screen sharing, chat and attachments, participant controls, administration, tray, hotkeys and signed updates.'
             echo
             if [ -n "$feats"  ]; then echo '## Features';    echo "$feats";  echo; fi
             if [ -n "$fixes"  ]; then echo '## Fixes';       echo "$fixes";  echo; fi
