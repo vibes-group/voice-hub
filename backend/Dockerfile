@@ -1,4 +1,4 @@
-FROM node:24.22-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS frontend
+FROM node:24.22-bookworm-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS frontend
 
 WORKDIR /src/frontend
 
@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend ./
 RUN --mount=type=cache,target=/root/.npm npm run build
 
-FROM rust:1.99-trixie@sha256:53766005847cbe02c3f59bfa49c1c4bb16695f2c9e5829c3d576a15406f5e733 AS chef
+FROM rust:1.100-trixie@sha256:e19840879045c951c905d0eaa9887f3439c62000e429963371b376bac8d38c31 AS chef
 
 WORKDIR /src
 
@@ -32,7 +32,7 @@ RUN cargo build --release --locked --bin voice-hub-app \
  && cp target/release/voice-hub-app /out-voice-hub-app \
  && rm -rf target
 
-FROM debian:13-slim@sha256:89c1ea91e897f0fe0a3731595330bc45b8bdef4047464a07116f891a94054b31
+FROM debian:13-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 RUN apt-get update \
  && apt-get upgrade -y \
